@@ -39,6 +39,11 @@ public class RestExceptionHandler extends ResponseEntityExceptionHandler {
         return problem(HttpStatus.CONFLICT, "Conflito", exception.getMessage());
     }
 
+    @ExceptionHandler(BusinessRuleException.class)
+    ProblemDetail handleBusinessRule(BusinessRuleException exception) {
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, "Regra de negócio", exception.getMessage());
+    }
+
     @ExceptionHandler(DataIntegrityViolationException.class)
     ProblemDetail handleIntegrity(DataIntegrityViolationException exception) {
         return problem(HttpStatus.CONFLICT, "Conflito", "Os dados violam uma regra do banco (ex.: e-mail duplicado).");

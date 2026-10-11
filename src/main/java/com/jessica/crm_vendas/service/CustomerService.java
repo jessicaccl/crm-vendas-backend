@@ -13,6 +13,7 @@ import com.jessica.crm_vendas.model.Customer;
 import com.jessica.crm_vendas.model.CustomerStatus;
 import com.jessica.crm_vendas.repository.CustomerRepository;
 import com.jessica.crm_vendas.repository.CustomerSpecifications;
+import com.jessica.crm_vendas.repository.DealRepository;
 
 import lombok.RequiredArgsConstructor;
 
@@ -21,6 +22,7 @@ import lombok.RequiredArgsConstructor;
 public class CustomerService {
 
     private final CustomerRepository repository;
+    private final DealRepository dealRepository;
 
     @Transactional(readOnly = true)
     public Page<CustomerResponseDTO> search(String text, CustomerStatus status, Pageable pageable) {
@@ -60,7 +62,11 @@ public class CustomerService {
 
     @Transactional
     public void delete(Long id) {
-        repository.delete(findOrThrow(id));
+        Customer customer = findOrThrow(id);
+        if (dealRepository.existsByCustomerId(id)) {
+            throw new ConflictException("Este cliente tem negócios no funil. Exclua os negócios antes de excluir o cliente.");
+        }
+        repository.delete(customer);
     }
 
     private Customer findOrThrow(Long id) {
