@@ -1,0 +1,35 @@
+# Sobe banco + API com um comando: docker compose up --build
+# Lê DB_USERNAME e DB_PASSWORD do arquivo .env (veja .env.example).
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: crm_db
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Defina DB_PASSWORD no arquivo .env}
+    ports:
+      - "5433:5432" # 5433 para não conflitar com um PostgreSQL instalado na máquina
+    volumes:
+      - crm-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d crm_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/crm_db
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+      DEMO_DATA: ${DEMO_DATA:-true}
+    ports:
+      - "8080:8080"
+
+volumes:
+  crm-data:
