@@ -5,9 +5,11 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
@@ -44,8 +46,9 @@ import com.jessica.crm_vendas.service.DealService;
 import lombok.RequiredArgsConstructor;
 
 /**
- * Transforma um envio de formulário em Lead + Negócio no funil da organização dona do webhook.
- * O mesmo contato (pelo e-mail ou pelo WhatsApp) não é duplicado: ganha só um negócio novo.
+ * Transforma leads de fora (webhook do Netlify, planilha CSV) em Lead + Negócio no funil da organização.
+ * Todas as entradas usam a mesma regra: o mesmo contato (pelo e-mail ou pelo WhatsApp) não é duplicado,
+ * ganha só um negócio novo, e o mesmo envio nunca é processado duas vezes.
  */
 @Service
 @RequiredArgsConstructor
@@ -54,6 +57,7 @@ public class LeadIntakeService {
     public static final String NETLIFY_WEBHOOK_PATH = "/api/v1/integrations/netlify/forms/";
 
     static final String NETLIFY = "NETLIFY";
+    static final String CSV = "CSV";
     private static final int TITLE_MAX = 150;
     private static final Pattern VALID_EMAIL = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
     private static final SecureRandom RANDOM = new SecureRandom();
@@ -78,12 +82,33 @@ public class LeadIntakeService {
             throw new InvalidSignatureException("Webhook sem assinatura válida do Netlify.");
         }
 
-        Long org = organization.getId();
         NetlifySubmission submission = NetlifySubmission.from(parse(body));
         String externalId = submission.id() != null ? submission.id() : NetlifySignatureVerifier.sha256Hex(body);
+        LeadData lead = new LeadData(
+                submission.name(), submission.phone(), submission.email(), submission.company(),
+                submission.result(), submission.score(),
+                "Netlify Forms" + (submission.formName() != null ? " (" + submission.formName() + ")" : ""),
+                "Lead do formulário" + (submission.formName() != null ? " " + submission.formName() : ""),
+                Map.of());
 
+        if (!lead.hasContact()) {
+            throw new BusinessRuleException("O envio não tem nome, telefone nem e-mail.");
+        }
+
+        return register(organization.getId(), NETLIFY, externalId, submission.formName(), lead,
+                new String(body, StandardCharsets.UTF_8), clock.instant(), DealSource.WEBSITE);
+    }
+
+    /**
+     * Registra um lead na organização: reaproveita o contato existente (e-mail ou WhatsApp),
+     * abre um negócio em Prospecto e guarda o conteúdo original. Se o mesmo envio
+     * (provider + externalId) já foi processado, não faz nada e avisa que é duplicado.
+     */
+    @Transactional
+    LeadIntakeResultDTO register(Long org, String provider, String externalId, String formName, LeadData data,
+                                 String payloadJson, Instant receivedAt, DealSource source) {
         Optional<InboundLead> alreadyReceived =
-                inboundLeadRepository.findByOrganizationIdAndProviderAndExternalId(org, NETLIFY, externalId);
+                inboundLeadRepository.findByOrganizationIdAndProviderAndExternalId(org, provider, externalId);
         if (alreadyReceived.isPresent()) {
             InboundLead lead = alreadyReceived.get();
             return new LeadIntakeResultDTO(
@@ -92,15 +117,11 @@ public class LeadIntakeService {
                     false, true);
         }
 
-        if (submission.name() == null && submission.phone() == null && submission.email() == null) {
-            throw new BusinessRuleException("O envio não tem nome, telefone nem e-mail.");
-        }
-
-        // E-mail é opcional no formulário; texto que não é e-mail é descartado em vez de ir para o cadastro
-        String email = submission.email() != null && VALID_EMAIL.matcher(submission.email()).matches()
-                ? submission.email().toLowerCase()
+        // E-mail é opcional; texto que não é e-mail é descartado em vez de ir para o cadastro
+        String email = data.email() != null && VALID_EMAIL.matcher(data.email()).matches()
+                ? data.email().toLowerCase()
                 : null;
-        String phoneDigits = PhoneNumbers.digits(submission.phone());
+        String phoneDigits = PhoneNumbers.digits(data.phone());
 
         Optional<Customer> existing = Optional.<Customer>empty();
         if (email != null) existing = customerRepository.findFirstByOrganizationIdAndEmail(org, email);
@@ -110,35 +131,35 @@ public class LeadIntakeService {
         Customer customer = existing.orElseGet(Customer::new);
         if (newCustomer) {
             customer.setOrganizationId(org);
-            customer.setName(submission.name() != null ? submission.name() : "Lead do formulário");
+            customer.setName(data.name() != null ? data.name() : "Lead sem nome");
             customer.setStatus(CustomerStatus.LEAD);
         }
         // Completa o cadastro sem sobrescrever o que já existe
         if (customer.getEmail() == null && email != null) customer.setEmail(email);
         if (customer.getPhone() == null && phoneDigits != null) customer.setPhone(PhoneNumbers.format(phoneDigits));
-        if (customer.getCompany() == null && submission.company() != null) customer.setCompany(submission.company());
+        if (customer.getCompany() == null && data.company() != null) customer.setCompany(data.company());
         Customer saved = customerRepository.save(customer);
 
-        // O webhook não tem login: o negócio é criado explicitamente na organização dona do formulário
+        // Entradas externas não têm login: o negócio é criado explicitamente na organização dona do lead
         DealResponseDTO deal = tenant.callAs(org, () -> dealService.create(new DealRequestDTO(
-                dealTitle(submission),
+                dealTitle(data),
                 saved.getId(),
                 BigDecimal.ZERO,
                 DealStage.PROSPECT,
-                DealSource.WEBSITE,
+                source,
                 null,
                 null,
-                notes(submission))));
+                notes(data))));
 
         InboundLead lead = new InboundLead();
         lead.setOrganizationId(org);
-        lead.setProvider(NETLIFY);
+        lead.setProvider(provider);
         lead.setExternalId(externalId);
-        lead.setFormName(submission.formName());
-        lead.setPayload(new String(body, StandardCharsets.UTF_8));
+        lead.setFormName(formName);
+        lead.setPayload(payloadJson);
         lead.setCustomer(saved);
         lead.setDeal(dealRepository.getReferenceById(deal.id()));
-        lead.setReceivedAt(clock.instant());
+        lead.setReceivedAt(receivedAt);
         inboundLeadRepository.save(lead);
 
         return new LeadIntakeResultDTO(saved.getId(), deal.id(), newCustomer, false);
@@ -196,18 +217,18 @@ public class LeadIntakeService {
         }
     }
 
-    private static String dealTitle(NetlifySubmission submission) {
-        String title = submission.result() != null
-                ? "Diagnóstico: " + submission.result()
-                : "Lead do formulário" + (submission.formName() != null ? " " + submission.formName() : "");
+    private static String dealTitle(LeadData data) {
+        String title = data.result() != null ? "Diagnóstico: " + data.result() : data.fallbackTitle();
         return title.length() <= TITLE_MAX ? title : title.substring(0, TITLE_MAX - 1) + "…";
     }
 
-    private static String notes(NetlifySubmission submission) {
+    private static String notes(LeadData data) {
         List<String> lines = new ArrayList<>();
-        lines.add("Origem: Netlify Forms" + (submission.formName() != null ? " (" + submission.formName() + ")" : ""));
-        if (submission.result() != null) lines.add("Resultado do diagnóstico: " + submission.result());
-        if (submission.score() != null) lines.add("Placar: " + submission.score());
-        return String.join("\n", lines);
+        lines.add("Origem: " + data.origin());
+        if (data.result() != null) lines.add("Resultado do diagnóstico: " + data.result());
+        if (data.score() != null) lines.add("Placar: " + data.score());
+        data.extras().forEach((field, value) -> lines.add(field + ": " + value));
+        String notes = String.join("\n", lines);
+        return notes.length() <= 2000 ? notes : notes.substring(0, 1999) + "…";
     }
 }

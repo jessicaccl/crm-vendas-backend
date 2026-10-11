@@ -73,6 +73,7 @@ São públicos apenas o login, o `/actuator/health` e a documentação.
 | GET | `/api/v1/reports/summary` | Indicadores: em aberto, ganho no mês, conversão em 90 dias, parados |
 | POST | `/api/v1/integrations/netlify/forms/{organização}` | Webhook do Netlify Forms (autenticado pela assinatura da organização) |
 | POST | `/api/v1/integrations/netlify/secret` | Gera a chave do webhook da organização (administradoras) |
+| POST | `/api/v1/integrations/import/csv?source=` | Importa uma planilha CSV de leads (multipart, até 2 MB / 2.000 linhas) |
 | GET | `/api/v1/integrations/leads` | Últimos leads recebidos pela organização |
 | GET | `/api/v1/integrations/status` | Situação das integrações da organização |
 
@@ -142,6 +143,20 @@ Quiz (React) ─▶ Netlify Forms ─webhook assinado─▶ API /netlify/forms/u
 
 Enquanto a organização não gera a chave, o webhook dela responde 404.
 
+### Importação de planilha (CSV)
+
+Para trazer leads antigos (export do Netlify Forms, Excel, Google Sheets), a mesma regra do webhook é usada linha a linha:
+
+- **Colunas reconhecidas pelo nome**, em português ou inglês, com ou sem acento: `nome`/`name`,
+  `telefone`/`whatsapp`/`phone`, `e-mail`, `empresa`, `resultado`, `placar`, `data`/`created_at`, `id`.
+  As outras colunas vão para as observações do negócio; colunas técnicas (`ip`, `user_agent`…) são ignoradas.
+- **Formatos**: vírgula ou ponto e vírgula, UTF-8 (com ou sem BOM) ou o padrão do Excel no Windows.
+- **Idempotente**: cada linha tem uma identidade (o `id` da planilha ou um hash dos dados). Importar o mesmo
+  arquivo de novo não cria nada repetido.
+- **Relatório**: linhas lidas, importadas, contatos novos, já importadas, e quais linhas foram ignoradas e por quê.
+
+O parser fica em `CsvLeadParser` e é testado com os formatos do Netlify e do Excel em português.
+
 ## Deploy
 
 Banco no **Neon**, API no **Render** (Docker, via [`render.yaml`](render.yaml)) e frontend na **Vercel**, todos no plano gratuito.
@@ -158,7 +173,7 @@ repository/   acesso a dados e filtros (Specifications)
 model/        entidades JPA
 dto/          contratos de entrada e saída
 security/     JWT, organização do pedido (TenantContext), regras de acesso e respostas 401
-integration/  entrada de leads externos (webhook do Netlify, assinatura, deduplicação)
+integration/  entrada de leads externos (webhook do Netlify, planilhas CSV, assinatura, deduplicação)
 exception/    erros de domínio e handler global
 event/        eventos de domínio (mudança de etapa)
 config/       CORS, OpenAPI, relógio/fuso, usuários iniciais, dados de demonstração
@@ -170,7 +185,7 @@ db/migration  scripts versionados do Flyway
 - [x] Fase 1: base (configuração segura, DTOs, erros padronizados, paginação, Flyway, Docker)
 - [x] Fase 2: negócios, histórico de etapas e indicadores do funil
 - [x] Fase 3: login (JWT), testes de integração, CI, deploy e demo online
-- [x] Fase 4: integração com o formulário do Netlify
+- [x] Fase 4: integração com o formulário do Netlify e importação de planilhas CSV
 - [x] Fase 5: multiempresa (organizações isoladas em um único deploy)
 - [ ] Fase 6: painel de resultados
 - [ ] Fase 7: ficha do cliente com atividades e tarefas, webhooks de saída
