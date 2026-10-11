@@ -5,7 +5,7 @@ services:
     name: crm-vendas-api
     runtime: docker
     plan: free
-    region: oregon
+    region: ohio # mesma região do banco no Neon (AWS us-east-2)
     healthCheckPath: /actuator/health
     envVars:
       - key: DB_URL
