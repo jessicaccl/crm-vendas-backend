@@ -52,7 +52,7 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
                 // Webhook do Netlify: autenticado pela assinatura no corpo, não por login
-                .requestMatchers(HttpMethod.POST, "/api/v1/integrations/netlify/forms").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/v1/integrations/netlify/forms/*").permitAll()
                 .requestMatchers("/actuator/health", "/docs", "/docs/**", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                 .anyRequest().authenticated())
             .oauth2ResourceServer(oauth -> oauth

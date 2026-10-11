@@ -17,10 +17,13 @@ public class Customer {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(nullable = false, updatable = false)
+    private Long organizationId;
+
     @Column(nullable = false)
     private String name;
 
-    @Column(unique = true)
+    /** Único dentro da organização (uk_customers_org_email). */
     private String email;
 
     private String phone;

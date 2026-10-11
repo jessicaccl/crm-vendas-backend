@@ -18,6 +18,9 @@ public class InboundLead {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(nullable = false, updatable = false)
+    private Long organizationId;
+
     @Column(nullable = false, length = 30)
     private String provider;
 

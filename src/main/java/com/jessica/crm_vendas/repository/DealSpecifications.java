@@ -15,10 +15,11 @@ public final class DealSpecifications {
 
     private DealSpecifications() {}
 
-    /** Busca por texto (título, nome do contato ou empresa) e filtro opcional por cliente. */
-    public static Specification<Deal> search(String text, Long customerId) {
+    /** Negócios da organização, com busca por texto (título, contato ou empresa) e filtro opcional por cliente. */
+    public static Specification<Deal> search(Long organizationId, String text, Long customerId) {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
+            predicates.add(cb.equal(root.get("organizationId"), organizationId));
             Join<Deal, Customer> customer = root.join("customer");
 
             if (customerId != null) {

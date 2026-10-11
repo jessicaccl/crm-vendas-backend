@@ -7,6 +7,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import com.jessica.crm_vendas.dto.InboundLeadDTO;
+import com.jessica.crm_vendas.dto.IntegrationStatusDTO;
 import com.jessica.crm_vendas.dto.LeadIntakeResultDTO;
 import com.jessica.crm_vendas.integration.LeadIntakeService;
 
@@ -21,33 +22,39 @@ import lombok.RequiredArgsConstructor;
 @Tag(name = "Integrações", description = "Entrada de leads de outras plataformas")
 public class IntegrationController {
 
-    static final String NETLIFY_WEBHOOK_PATH = "/api/v1/integrations/netlify/forms";
-
     private final LeadIntakeService service;
 
-    public record IntegrationStatus(boolean netlifyEnabled, String netlifyWebhookPath) {}
+    public record NetlifySecret(String secret) {}
 
-    @PostMapping("/netlify/forms")
+    @PostMapping("/netlify/forms/{organizationSlug}")
     @SecurityRequirements
-    @Operation(summary = "Recebe envios de formulários do Netlify (webhook)",
-            description = "Autenticado pela assinatura X-Webhook-Signature (JWS secret token configurado no Netlify). "
+    @Operation(summary = "Recebe envios de formulários do Netlify (webhook) para uma organização",
+            description = "Autenticado pela assinatura X-Webhook-Signature (JWS secret token da organização). "
                     + "Cria ou atualiza o Lead e abre um negócio em Prospecto. Reenvios do mesmo envio são ignorados.")
     public ResponseEntity<LeadIntakeResultDTO> receiveNetlify(
+            @PathVariable String organizationSlug,
             @RequestBody byte[] body,
             @RequestHeader(value = "X-Webhook-Signature", required = false) String signature) {
-        LeadIntakeResultDTO result = service.receiveNetlify(body, signature);
+        LeadIntakeResultDTO result = service.receiveNetlify(organizationSlug, body, signature);
         return ResponseEntity.status(result.duplicate() ? HttpStatus.OK : HttpStatus.CREATED).body(result);
     }
 
     @GetMapping("/leads")
-    @Operation(summary = "Últimos leads recebidos por integrações")
+    @Operation(summary = "Últimos leads recebidos pela organização")
     public List<InboundLeadDTO> recentLeads(@RequestParam(defaultValue = "20") int limit) {
         return service.recent(Math.max(1, Math.min(limit, 100)));
     }
 
     @GetMapping("/status")
-    @Operation(summary = "Quais integrações estão ativas neste ambiente")
-    public IntegrationStatus status() {
-        return new IntegrationStatus(service.isNetlifyEnabled(), NETLIFY_WEBHOOK_PATH);
+    @Operation(summary = "Situação das integrações da organização")
+    public IntegrationStatusDTO status() {
+        return service.status();
+    }
+
+    @PostMapping("/netlify/secret")
+    @Operation(summary = "Gera uma nova chave para o webhook do Netlify (administradores)",
+            description = "A chave anterior deixa de funcionar. Cole a nova no campo JWS secret token do Netlify.")
+    public NetlifySecret regenerateNetlifySecret() {
+        return new NetlifySecret(service.regenerateNetlifySecret());
     }
 }

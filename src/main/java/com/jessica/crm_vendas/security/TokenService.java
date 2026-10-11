@@ -28,6 +28,7 @@ public class TokenService {
         this.expiration = expiration;
     }
 
+    /** O token carrega a organização: é dela que vêm todos os dados que a pessoa enxerga. */
     public IssuedToken issue(User user) {
         Instant now = clock.instant();
         Instant expiresAt = now.plus(expiration);
@@ -38,7 +39,8 @@ public class TokenService {
                 .issuedAt(now)
                 .expiresAt(expiresAt)
                 .claim("name", user.getName())
-                .claim("role", user.getRole().name())
+                .claim(TenantContext.ROLE_CLAIM, user.getRole().name())
+                .claim(TenantContext.ORG_CLAIM, user.getOrganizationId())
                 .build();
 
         String token = encoder.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims))

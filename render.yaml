@@ -1,9 +1,8 @@
 # Blueprint do Render: New > Blueprint > escolha este repositório.
 # Valores com "sync: false" são preenchidos na tela do Render (nunca ficam no Git).
 #
-# Dois ambientes com o mesmo código:
-#   crm-vendas-api  -> demo pública (dados fictícios, usuário demo, restaurada todo dia)
-#   crm-unic-api    -> CRM real da Unic (banco próprio, sem usuário demo, recebe os leads do Netlify)
+# Um único serviço atende todas as empresas (multiempresa): a organização "Demo" com dados
+# fictícios e login público, e a organização da administradora com os dados reais.
 services:
   - type: web
     name: crm-vendas-api
@@ -26,39 +25,13 @@ services:
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
+      - key: ADMIN_ORG_NAME
+        sync: false # nome da empresa da administradora, ex.: Unic Studio
+      - key: ADMIN_ORG_SLUG
+        sync: false # identificador curto usado no endereço do webhook, ex.: unic
       - key: DEMO_DATA
         value: "true"
       - key: DEMO_RESET_CRON
-        value: "0 0 4 * * *"
-      - key: APP_TIMEZONE
-        value: America/Sao_Paulo
-
-  - type: web
-    name: crm-unic-api
-    runtime: docker
-    plan: free
-    region: ohio
-    healthCheckPath: /actuator/health
-    envVars:
-      - key: DB_URL
-        sync: false # mesmo host do Neon, banco separado: jdbc:postgresql://<host>/crm_unic?sslmode=require
-      - key: DB_USERNAME
-        sync: false
-      - key: DB_PASSWORD
-        sync: false
-      - key: JWT_SECRET
-        generateValue: true
-      - key: NETLIFY_WEBHOOK_SECRET
-        generateValue: true # copie este valor para o "JWS secret token" do webhook no Netlify
-      - key: CORS_ALLOWED_ORIGINS
-        sync: false # endereço do frontend do CRM da Unic na Vercel
-      - key: ADMIN_EMAIL
-        sync: false
-      - key: ADMIN_PASSWORD
-        sync: false
-      - key: DEMO_DATA
-        value: "false"
-      - key: DEMO_USER_ENABLED
-        value: "false"
+        value: "0 0 4 * * *" # restaura só a organização Demo
       - key: APP_TIMEZONE
         value: America/Sao_Paulo
