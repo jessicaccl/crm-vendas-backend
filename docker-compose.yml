@@ -28,6 +28,10 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
       DEMO_DATA: ${DEMO_DATA:-true}
+      JWT_SECRET: ${JWT_SECRET:-}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      DEMO_RESET_CRON: ${DEMO_RESET_CRON:--}
     ports:
       - "8080:8080"
 

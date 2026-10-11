@@ -13,6 +13,7 @@ import java.time.Instant;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -24,6 +25,8 @@ import com.jessica.crm_vendas.exception.ResourceNotFoundException;
 import com.jessica.crm_vendas.model.CustomerStatus;
 import com.jessica.crm_vendas.service.CustomerService;
 
+// Testa só a camada web; autenticação é coberta em ApiIntegrationTest
+@AutoConfigureMockMvc(addFilters = false)
 @WebMvcTest(CustomerController.class)
 class CustomerControllerTest {
 

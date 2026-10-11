@@ -1,0 +1,30 @@
+# Blueprint do Render: New > Blueprint > escolha este repositório.
+# Valores com "sync: false" são pedidos na tela do Render (nunca ficam no Git).
+services:
+  - type: web
+    name: crm-vendas-api
+    runtime: docker
+    plan: free
+    region: ohio # mesma região do banco no Neon (AWS us-east-2)
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: DB_URL
+        sync: false # jdbc:postgresql://<host-do-neon>/<banco>?sslmode=require
+      - key: DB_USERNAME
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false # endereço do frontend na Vercel, ex.: https://crm-pro.vercel.app
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: DEMO_DATA
+        value: "true"
+      - key: DEMO_RESET_CRON
+        value: "0 0 4 * * *"
+      - key: APP_TIMEZONE
+        value: America/Sao_Paulo

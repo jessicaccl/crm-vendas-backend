@@ -1,16 +1,18 @@
 # CRM Vendas · API
 
-API REST de um CRM de vendas: clientes, funil de negócios e integrações com outras plataformas.
+[![CI](https://github.com/jessicaccl/crm-vendas-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/jessicaccl/crm-vendas-backend/actions/workflows/ci.yml)
+
+API REST de um CRM de vendas: clientes, funil de negócios, indicadores e integrações com outras plataformas.
 Frontend em [crm-frontend](https://github.com/jessicaccl/crm-frontend).
 
-**Stack:** Java 17 · Spring Boot 3.5 · Spring Data JPA · PostgreSQL · Flyway · springdoc (Swagger) · Docker
+**Stack:** Java 17 · Spring Boot 3.5 · Spring Security (JWT) · Spring Data JPA · PostgreSQL · Flyway · springdoc (Swagger) · Testcontainers · Docker
 
 ## Como rodar
 
 ### Opção 1: Docker (banco + API)
 
 ```bash
-cp .env.example .env      # defina DB_PASSWORD
+cp .env.example .env      # defina DB_PASSWORD e JWT_SECRET
 docker compose up --build
 ```
 
@@ -23,24 +25,37 @@ cp .env.example .env      # ajuste DB_URL, DB_USERNAME e DB_PASSWORD
 ./mvnw spring-boot:run
 ```
 
-O Flyway cria e atualiza as tabelas sozinho. Com `DEMO_DATA=true`, um banco vazio recebe clientes de exemplo.
+O Flyway cria e atualiza as tabelas sozinho. Com `DEMO_DATA=true`, um banco vazio recebe clientes e negócios de exemplo.
+
+**Login de demonstração:** `demo@crmpro.dev` / `demo1234`. Para criar sua conta de administradora, defina `ADMIN_EMAIL` e `ADMIN_PASSWORD`.
 
 ### Testes
 
 ```bash
-./mvnw test
+./mvnw verify
 ```
+
+Roda os testes de unidade e os de integração, que sobem um PostgreSQL real com Testcontainers (precisa do Docker ligado).
+No GitHub, o mesmo comando roda a cada push e pull request.
+
+## Autenticação
+
+A API é stateless: `POST /api/v1/auth/login` devolve um JWT, e as demais rotas exigem `Authorization: Bearer <token>`.
+No Swagger, faça login, copie o `token` e clique em **Authorize**.
+
+São públicos apenas o login, o `/actuator/health` e a documentação.
 
 ## Endpoints (v1)
 
 | Método | Rota | O que faz |
 |---|---|---|
-| GET | `/api/v1/customers?q=&status=&page=&size=&sort=` | Lista com busca, filtro e paginação |
+| POST | `/api/v1/auth/login` | Login, devolve o token |
+| GET | `/api/v1/auth/me` | Usuário logado |
+| GET | `/api/v1/customers?q=&status=&page=&size=&sort=` | Lista clientes com busca, filtro e paginação |
 | GET | `/api/v1/customers/{id}` | Detalhe |
 | POST | `/api/v1/customers` | Cadastra (201 + `Location`) |
 | PUT | `/api/v1/customers/{id}` | Atualiza |
-| DELETE | `/api/v1/customers/{id}` | Exclui (204) |
-
+| DELETE | `/api/v1/customers/{id}` | Exclui (409 se o cliente tiver negócios) |
 | GET | `/api/v1/deals?q=&customerId=` | Lista negócios (alimenta o Kanban) |
 | GET | `/api/v1/deals/{id}` | Detalhe |
 | POST | `/api/v1/deals` | Cria um negócio |
@@ -51,15 +66,6 @@ O Flyway cria e atualiza as tabelas sozinho. Com `DEMO_DATA=true`, um banco vazi
 
 Status do cliente: `LEAD`, `CUSTOMER`, `INACTIVE`.
 Etapas do negócio: `PROSPECT`, `QUALIFIED`, `PROPOSAL`, `WON`, `LOST` (perder exige `lostReason`, senão responde 422).
-
-## Modelo
-
-```
-Cliente 1 ── N Negócio 1 ── N Mudança de etapa
-```
-
-Toda mudança de etapa gera um registro em `tb_deal_stage_changes` e publica um `DealStageChangedEvent`.
-Esse evento é o ponto de extensão para integrações: na fase 5 um listener envia webhooks com ele.
 
 Erros seguem o padrão [ProblemDetail (RFC 9457)](https://www.rfc-editor.org/rfc/rfc9457):
 
@@ -72,6 +78,27 @@ Erros seguem o padrão [ProblemDetail (RFC 9457)](https://www.rfc-editor.org/rfc
 }
 ```
 
+## Modelo
+
+```
+Cliente 1 ── N Negócio 1 ── N Mudança de etapa
+Usuário (login)
+```
+
+Toda mudança de etapa gera um registro em `tb_deal_stage_changes` e publica um `DealStageChangedEvent`.
+Esse evento é o ponto de extensão para integrações: na fase 5 um listener envia webhooks com ele.
+
+## Deploy (Neon + Render)
+
+1. **Banco no [Neon](https://neon.tech):** crie um projeto e copie os dados de conexão.
+   A URL do Neon tem o formato `postgresql://usuario:senha@host/banco?sslmode=require`; no Render ela vira três variáveis:
+   `DB_URL=jdbc:postgresql://host/banco?sslmode=require`, `DB_USERNAME=usuario` e `DB_PASSWORD=senha`.
+2. **API no [Render](https://render.com):** New → Blueprint → este repositório. O `render.yaml` já configura o Docker,
+   o health check e gera o `JWT_SECRET`. Preencha as variáveis pedidas na tela.
+3. Depois do deploy do frontend, coloque o endereço dele em `CORS_ALLOWED_ORIGINS`.
+
+Na demo online, `DEMO_RESET_CRON=0 0 4 * * *` restaura os dados de exemplo todo dia às 4h.
+
 ## Estrutura
 
 ```
@@ -80,9 +107,10 @@ service/      regras de negócio
 repository/   acesso a dados e filtros (Specifications)
 model/        entidades JPA
 dto/          contratos de entrada e saída
+security/     JWT, regras de acesso e respostas 401
 exception/    erros de domínio e handler global
 event/        eventos de domínio (mudança de etapa)
-config/       CORS, OpenAPI, relógio/fuso, dados de demonstração
+config/       CORS, OpenAPI, relógio/fuso, usuários iniciais, dados de demonstração
 db/migration  scripts versionados do Flyway
 ```
 
@@ -90,6 +118,6 @@ db/migration  scripts versionados do Flyway
 
 - [x] Fase 1: base (configuração segura, DTOs, erros padronizados, paginação, Flyway, Docker)
 - [x] Fase 2: negócios, histórico de etapas e indicadores do funil
-- [ ] Fase 3: login (JWT), testes de integração, CI e demo online
+- [x] Fase 3: login (JWT), testes de integração, CI e configuração de deploy
 - [ ] Fase 4: painel de resultados
 - [ ] Fase 5: atividades, tarefas, webhooks e entrada de leads por API
