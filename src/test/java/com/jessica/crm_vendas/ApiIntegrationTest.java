@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -19,6 +20,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
@@ -161,6 +163,9 @@ class ApiIntegrationTest {
         // A Unic não enxerga os dados fictícios da Demo
         assertThat(dealTitles(admin)).doesNotContain("App de pedidos", "E-commerce completo");
 
+        long demoOpenBefore = summary(demo).get("openCount").asLong();
+        long unicOpenBefore = summary(admin).get("openCount").asLong();
+
         // A Unic cadastra um cliente e um negócio
         long customerId = body(mvc.perform(post("/api/v1/customers")
                         .header(HttpHeaders.AUTHORIZATION, admin)
@@ -199,13 +204,9 @@ class ApiIntegrationTest {
                         .content("{\"name\":\"Outro Rafa\",\"email\":\"rafa@sigilo.com\"}"))
                 .andExpect(status().isCreated());
 
-        // Os indicadores da Unic contam só os negócios dela
-        long demoOpen = body(mvc.perform(get("/api/v1/reports/summary").header(HttpHeaders.AUTHORIZATION, demo)))
-                .get("openCount").asLong();
-        long unicOpen = body(mvc.perform(get("/api/v1/reports/summary").header(HttpHeaders.AUTHORIZATION, admin)))
-                .get("openCount").asLong();
-        assertThat(demoOpen).isGreaterThanOrEqualTo(7);
-        assertThat(unicOpen).isLessThan(demoOpen);
+        // O negócio novo entra só nos indicadores da Unic
+        assertThat(summary(admin).get("openCount").asLong()).isEqualTo(unicOpenBefore + 1);
+        assertThat(summary(demo).get("openCount").asLong()).isEqualTo(demoOpenBefore);
     }
 
     @Test
@@ -334,6 +335,49 @@ class ApiIntegrationTest {
         mvc.perform(get("/api/v1/customers/" + created.get("customerId").asLong()).header(HttpHeaders.AUTHORIZATION, admin))
                 .andExpect(jsonPath("$.email").value(nullValue()))
                 .andExpect(jsonPath("$.phone").value("(11) 97777-6666"));
+    }
+
+    // ---------- Importação de planilha ----------
+
+    @Test
+    void csvImportCreatesLeadsOnceAndOnlyInTheOwnOrganization() throws Exception {
+        String admin = admin();
+        String csv = """
+                nome;whatsapp;e-mail;resultado;como conheceu
+                Carla Planilha;(21) 91111-2222;carla@planilha.com;Gestão de Redes Sociais;Indicação
+                Carla Planilha;21911112222;;Página Profissional (One Page);
+                ;;;;
+                Bruno Planilha;11922223333;;;Google
+                """;
+        MockMultipartFile file = new MockMultipartFile("file", "leads-antigos.csv", "text/csv",
+                csv.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        mvc.perform(multipart("/api/v1/integrations/import/csv").file(file).param("source", "WEBSITE")
+                        .header(HttpHeaders.AUTHORIZATION, admin))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.rows").value(4))
+                .andExpect(jsonPath("$.imported").value(3))
+                .andExpect(jsonPath("$.newCustomers").value(2))
+                .andExpect(jsonPath("$.skipped").value(1))
+                .andExpect(jsonPath("$.issues[0].line").value(4))
+                .andExpect(jsonPath("$.extraColumns[0]").value("como conheceu"));
+
+        // Importar o mesmo arquivo de novo não duplica nada
+        mvc.perform(multipart("/api/v1/integrations/import/csv").file(file).header(HttpHeaders.AUTHORIZATION, admin))
+                .andExpect(jsonPath("$.imported").value(0))
+                .andExpect(jsonPath("$.duplicates").value(3));
+
+        assertThat(dealTitles(admin)).contains("Diagnóstico: Gestão de Redes Sociais", "Lead importado");
+        assertThat(dealTitles(demo())).doesNotContain("Diagnóstico: Gestão de Redes Sociais");
+    }
+
+    @Test
+    void csvImportExplainsWhatIsWrongWithTheFile() throws Exception {
+        MockMultipartFile file = new MockMultipartFile("file", "errado.csv", "text/csv",
+                "produto,valor\nSite,1000\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        mvc.perform(multipart("/api/v1/integrations/import/csv").file(file).header(HttpHeaders.AUTHORIZATION, admin()))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.detail").value(containsString("Não encontrei colunas de nome, telefone ou e-mail")));
     }
 
     private JsonNode summary(String token) throws Exception {
