@@ -108,6 +108,7 @@ public class DealService {
         deal.setValue(data.value());
         deal.setSource(data.source());
         deal.setExpectedCloseDate(data.expectedCloseDate());
+        deal.setNotes(data.notes() == null || data.notes().isBlank() ? null : data.notes().trim());
         deal.setCustomer(findCustomer(data.customerId()));
     }
 

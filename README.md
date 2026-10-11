@@ -71,6 +71,9 @@ São públicos apenas o login, o `/actuator/health` e a documentação.
 | PATCH | `/api/v1/deals/{id}/stage` | Move de etapa, grava o histórico e publica o evento |
 | DELETE | `/api/v1/deals/{id}` | Exclui |
 | GET | `/api/v1/reports/summary` | Indicadores: em aberto, ganho no mês, conversão em 90 dias, parados |
+| POST | `/api/v1/integrations/netlify/forms` | Webhook do Netlify Forms (autenticado por assinatura) |
+| GET | `/api/v1/integrations/leads` | Últimos leads recebidos por integrações |
+| GET | `/api/v1/integrations/status` | Integrações ativas no ambiente |
 
 Status do cliente: `LEAD`, `CUSTOMER`, `INACTIVE`.
 Etapas do negócio: `PROSPECT`, `QUALIFIED`, `PROPOSAL`, `WON`, `LOST` (perder exige `lostReason`, senão responde 422).
@@ -90,11 +93,45 @@ Erros seguem o padrão [ProblemDetail (RFC 9457)](https://www.rfc-editor.org/rfc
 
 ```
 Cliente 1 ── N Negócio 1 ── N Mudança de etapa
+Lead recebido (integração) ──> Cliente + Negócio
 Usuário (login)
 ```
 
 Toda mudança de etapa gera um registro em `tb_deal_stage_changes` e publica um `DealStageChangedEvent`.
 Esse evento é o ponto de extensão para integrações: na fase 5 um listener envia webhooks com ele.
+
+## Integração: leads do formulário do Netlify
+
+O [quiz de diagnóstico da Unic Studio](https://github.com/jessicaccl/unic-quiz-diagnostico) grava cada resposta no
+Netlify Forms. Um **outgoing webhook** do Netlify envia o envio para o CRM, que:
+
+1. **Confere a assinatura** `X-Webhook-Signature`: um JWT HS256 com `iss=netlify` e o `sha256` do corpo,
+   assinado com o mesmo segredo configurado no Netlify e em `NETLIFY_WEBHOOK_SECRET`. Sem ela, responde 401.
+2. **Ignora reenvios** do mesmo envio (chave única `provider + id do envio`).
+3. **Encontra ou cria o contato** pelo e-mail ou pelo WhatsApp, ignorando a formatação do número,
+   e completa o cadastro sem sobrescrever o que já existe.
+4. **Abre um negócio** "Diagnóstico: \<resultado\>" em Prospecto, com o placar nas observações,
+   passando pelo mesmo fluxo do funil (histórico de etapas e evento).
+5. **Guarda o envio original** em `tb_inbound_leads` (JSONB) para auditoria.
+
+```
+Quiz (React) ─▶ Netlify Forms ─webhook assinado─▶ API ─▶ Cliente (Lead) + Negócio em Prospecto
+```
+
+Sem `NETLIFY_WEBHOOK_SECRET`, a integração fica desligada (é o caso da demo pública).
+
+## Ambientes
+
+O mesmo código roda em dois ambientes, separados por configuração e por banco:
+
+| | Demo pública | CRM da Unic |
+|---|---|---|
+| Dados | fictícios, restaurados todo dia | reais (leads do diagnóstico) |
+| Login | usuário demo aberto + administradora | só a administradora |
+| Integração Netlify | desligada | ligada |
+| Configuração | `DEMO_DATA=true` | `DEMO_DATA=false`, `DEMO_USER_ENABLED=false`, `NETLIFY_WEBHOOK_SECRET` |
+
+Assim os dados de clientes reais nunca ficam visíveis para quem usa o login de demonstração (LGPD).
 
 ## Deploy
 
@@ -112,6 +149,7 @@ repository/   acesso a dados e filtros (Specifications)
 model/        entidades JPA
 dto/          contratos de entrada e saída
 security/     JWT, regras de acesso e respostas 401
+integration/  entrada de leads externos (webhook do Netlify, assinatura, deduplicação)
 exception/    erros de domínio e handler global
 event/        eventos de domínio (mudança de etapa)
 config/       CORS, OpenAPI, relógio/fuso, usuários iniciais, dados de demonstração
@@ -123,5 +161,6 @@ db/migration  scripts versionados do Flyway
 - [x] Fase 1: base (configuração segura, DTOs, erros padronizados, paginação, Flyway, Docker)
 - [x] Fase 2: negócios, histórico de etapas e indicadores do funil
 - [x] Fase 3: login (JWT), testes de integração, CI, deploy e demo online
-- [ ] Fase 4: painel de resultados
-- [ ] Fase 5: atividades, tarefas, webhooks e entrada de leads por API
+- [x] Fase 4: integração com o formulário do Netlify e ambiente real separado da demo
+- [ ] Fase 5: painel de resultados
+- [ ] Fase 6: ficha do cliente com atividades e tarefas, webhooks de saída

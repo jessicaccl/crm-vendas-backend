@@ -37,6 +37,10 @@ public class Deal {
 
     private String lostReason;
 
+    /** Observações livres (ex.: resultado do diagnóstico que originou o lead). */
+    @Column(columnDefinition = "text")
+    private String notes;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "customer_id")
     private Customer customer;

@@ -17,5 +17,6 @@ public record DealRequestDTO(
     DealStage stage,
     DealSource source,
     LocalDate expectedCloseDate,
-    @Size(max = 255, message = "Use no máximo 255 caracteres") String lostReason
+    @Size(max = 255, message = "Use no máximo 255 caracteres") String lostReason,
+    @Size(max = 2000, message = "Use no máximo 2000 caracteres") String notes
 ) {}

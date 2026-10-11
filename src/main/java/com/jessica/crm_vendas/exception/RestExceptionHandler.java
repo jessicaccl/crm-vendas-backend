@@ -45,6 +45,11 @@ public class RestExceptionHandler extends ResponseEntityExceptionHandler {
         return problem(HttpStatus.UNAUTHORIZED, "Login inválido", "E-mail ou senha incorretos.");
     }
 
+    @ExceptionHandler(InvalidSignatureException.class)
+    ProblemDetail handleInvalidSignature(InvalidSignatureException exception) {
+        return problem(HttpStatus.UNAUTHORIZED, "Assinatura inválida", exception.getMessage());
+    }
+
     @ExceptionHandler(BusinessRuleException.class)
     ProblemDetail handleBusinessRule(BusinessRuleException exception) {
         return problem(HttpStatus.UNPROCESSABLE_ENTITY, "Regra de negócio", exception.getMessage());
