@@ -41,7 +41,25 @@ O Flyway cria e atualiza as tabelas sozinho. Com `DEMO_DATA=true`, um banco vazi
 | PUT | `/api/v1/customers/{id}` | Atualiza |
 | DELETE | `/api/v1/customers/{id}` | Exclui (204) |
 
+| GET | `/api/v1/deals?q=&customerId=` | Lista negócios (alimenta o Kanban) |
+| GET | `/api/v1/deals/{id}` | Detalhe |
+| POST | `/api/v1/deals` | Cria um negócio |
+| PUT | `/api/v1/deals/{id}` | Atualiza |
+| PATCH | `/api/v1/deals/{id}/stage` | Move de etapa, grava o histórico e publica o evento |
+| DELETE | `/api/v1/deals/{id}` | Exclui |
+| GET | `/api/v1/reports/summary` | Indicadores: em aberto, ganho no mês, conversão em 90 dias, parados |
+
 Status do cliente: `LEAD`, `CUSTOMER`, `INACTIVE`.
+Etapas do negócio: `PROSPECT`, `QUALIFIED`, `PROPOSAL`, `WON`, `LOST` (perder exige `lostReason`, senão responde 422).
+
+## Modelo
+
+```
+Cliente 1 ── N Negócio 1 ── N Mudança de etapa
+```
+
+Toda mudança de etapa gera um registro em `tb_deal_stage_changes` e publica um `DealStageChangedEvent`.
+Esse evento é o ponto de extensão para integrações: na fase 5 um listener envia webhooks com ele.
 
 Erros seguem o padrão [ProblemDetail (RFC 9457)](https://www.rfc-editor.org/rfc/rfc9457):
 
@@ -63,14 +81,15 @@ repository/   acesso a dados e filtros (Specifications)
 model/        entidades JPA
 dto/          contratos de entrada e saída
 exception/    erros de domínio e handler global
-config/       CORS, OpenAPI, dados de demonstração
+event/        eventos de domínio (mudança de etapa)
+config/       CORS, OpenAPI, relógio/fuso, dados de demonstração
 db/migration  scripts versionados do Flyway
 ```
 
 ## Roteiro
 
 - [x] Fase 1: base (configuração segura, DTOs, erros padronizados, paginação, Flyway, Docker)
-- [ ] Fase 2: negócios e funil Kanban com indicadores
+- [x] Fase 2: negócios, histórico de etapas e indicadores do funil
 - [ ] Fase 3: login (JWT), testes de integração, CI e demo online
 - [ ] Fase 4: painel de resultados
 - [ ] Fase 5: atividades, tarefas, webhooks e entrada de leads por API

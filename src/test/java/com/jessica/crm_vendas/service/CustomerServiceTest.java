@@ -22,12 +22,16 @@ import com.jessica.crm_vendas.exception.ResourceNotFoundException;
 import com.jessica.crm_vendas.model.Customer;
 import com.jessica.crm_vendas.model.CustomerStatus;
 import com.jessica.crm_vendas.repository.CustomerRepository;
+import com.jessica.crm_vendas.repository.DealRepository;
 
 @ExtendWith(MockitoExtension.class)
 class CustomerServiceTest {
 
     @Mock
     private CustomerRepository repository;
+
+    @Mock
+    private DealRepository dealRepository;
 
     @InjectMocks
     private CustomerService service;
