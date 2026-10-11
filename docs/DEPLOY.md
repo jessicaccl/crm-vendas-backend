@@ -103,6 +103,59 @@ Pronto: abra o endereço da Vercel e clique em **Entrar como demo**.
 
 ---
 
+## 5. Segundo ambiente: CRM da Unic (dados reais)
+
+A demo pública tem um login aberto, então os leads reais vão para **outro ambiente**, com banco próprio
+e sem usuário demo. O código é o mesmo; muda a configuração.
+
+1. **Neon:** no mesmo projeto, abra **Databases → New database** e crie `crm_unic`
+   (mesmo branch e mesmo dono do banco da demo).
+2. **Render:** o `render.yaml` já descreve o serviço `crm-unic-api`. Depois do merge, o Blueprint cria o serviço;
+   em **Environment** preencha:
+
+   | Variável | Valor |
+   |---|---|
+   | `DB_URL` | o mesmo da demo, trocando o nome do banco: `jdbc:postgresql://HOST/crm_unic?sslmode=require` |
+   | `DB_USERNAME`, `DB_PASSWORD` | os mesmos da demo |
+   | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | seu login no CRM real |
+   | `CORS_ALLOWED_ORIGINS` | endereço do frontend do CRM da Unic (passo 3) |
+
+   `DEMO_DATA=false` e `DEMO_USER_ENABLED=false` já vêm do `render.yaml`, e o `NETLIFY_WEBHOOK_SECRET` é gerado
+   automaticamente. Salve e faça um **Manual Deploy**.
+3. **Vercel:** crie **outro projeto** a partir do mesmo repositório `crm-frontend`, com:
+
+   | Variável | Valor |
+   |---|---|
+   | `VITE_API_URL` | `https://crm-unic-api-XXXX.onrender.com/api/v1` |
+   | `VITE_DEMO_MODE` | `false` (esconde o acesso de demonstração na tela de login) |
+
+4. Volte ao `crm-unic-api` e coloque o endereço desse frontend em `CORS_ALLOWED_ORIGINS`.
+
+## 6. Webhook no Netlify (leads do diagnóstico)
+
+1. No Render, abra `crm-unic-api` → **Environment** e copie o valor de `NETLIFY_WEBHOOK_SECRET`.
+2. No Netlify, abra o site do quiz → **Site configuration → Notifications → Form submission notifications →
+   Add notification → Outgoing webhook**:
+
+   | Campo | Valor |
+   |---|---|
+   | Event to listen for | New form submission |
+   | URL to notify | `https://crm-unic-api-XXXX.onrender.com/api/v1/integrations/netlify/forms` |
+   | Form | `leads-diagnostico` |
+   | JWS secret token | o valor copiado no passo 1 |
+
+3. Responda o quiz uma vez. O lead aparece no CRM em **Integrações** e no funil, em **Prospecto**.
+
+O endereço exato do webhook também aparece na tela **Integrações** do CRM, com botão de copiar.
+
+> **API dormindo:** no plano gratuito do Render a API dorme sem uso e leva até 1 minuto para acordar.
+> Para não arriscar perder um webhook nesse intervalo, mantenha só o `crm-unic-api` acordado com um monitor
+> gratuito (ex.: [UptimeRobot](https://uptimerobot.com) ou [cron-job.org](https://cron-job.org)) chamando
+> `https://crm-unic-api-XXXX.onrender.com/actuator/health` a cada 10 minutos.
+> De qualquer forma, todo envio continua guardado também no painel **Forms** do Netlify.
+
+---
+
 ## Atualizações
 
 Depois do primeiro deploy, tudo é automático a cada merge na `main`:

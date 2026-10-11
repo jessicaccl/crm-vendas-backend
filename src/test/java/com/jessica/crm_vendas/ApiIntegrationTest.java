@@ -22,6 +22,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jessica.crm_vendas.integration.NetlifyTestSupport;
 
 /**
  * Sobe a aplicação inteira com um PostgreSQL de verdade (Testcontainers):
@@ -36,7 +37,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
     "app.demo-user.email=demo@crmpro.dev",
     "app.demo-user.password=demo1234",
     "app.jwt.secret=chave-de-teste-com-pelo-menos-32-caracteres",
-    "app.demo-reset-cron=-"
+    "app.demo-reset-cron=-",
+    "app.integrations.netlify.secret=" + NetlifyTestSupport.SECRET
 })
 class ApiIntegrationTest {
 
@@ -124,6 +126,88 @@ class ApiIntegrationTest {
         JsonNode after = summary(token);
         assertThat(after.get("wonThisMonthCount").asLong()).isEqualTo(before.get("wonThisMonthCount").asLong() + 1);
         assertThat(after.get("openCount").asLong()).isEqualTo(before.get("openCount").asLong() - 1);
+    }
+
+    @Test
+    void netlifyWebhookWithoutSignatureIsRejected() throws Exception {
+        mvc.perform(post("/api/v1/integrations/netlify/forms")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(NetlifyTestSupport.submission("sem-assinatura", "Intrusa", "21900000000", "")))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.title").value("Assinatura inválida"));
+    }
+
+    @Test
+    void netlifyLeadBecomesCustomerAndDealWithoutDuplicates() throws Exception {
+        String first = NetlifyTestSupport.submission("envio-1", "Marina Costa", "21987654321", "");
+
+        // Primeiro envio: cria o lead e o negócio
+        JsonNode created = json.readTree(mvc.perform(post("/api/v1/integrations/netlify/forms")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Webhook-Signature", NetlifyTestSupport.sign(first))
+                        .content(first))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.newCustomer").value(true))
+                .andReturn().getResponse().getContentAsString());
+
+        // Reenvio do mesmo envio: ignorado
+        mvc.perform(post("/api/v1/integrations/netlify/forms")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Webhook-Signature", NetlifyTestSupport.sign(first))
+                        .content(first))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.duplicate").value(true))
+                .andExpect(jsonPath("$.dealId").value(created.get("dealId").asLong()));
+
+        // Mesma pessoa refazendo o quiz, com o WhatsApp formatado de outro jeito: mesmo cliente, negócio novo
+        String second = NetlifyTestSupport.submission("envio-2", "Marina", "+55 (21) 98765-4321", "marina@exemplo.com");
+        mvc.perform(post("/api/v1/integrations/netlify/forms")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Webhook-Signature", NetlifyTestSupport.sign(second))
+                        .content(second))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.newCustomer").value(false))
+                .andExpect(jsonPath("$.customerId").value(created.get("customerId").asLong()));
+
+        String token = login("demo@crmpro.dev", "demo1234");
+
+        mvc.perform(get("/api/v1/customers/" + created.get("customerId").asLong()).header(HttpHeaders.AUTHORIZATION, token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Marina Costa"))
+                .andExpect(jsonPath("$.phone").value("(21) 98765-4321"))
+                .andExpect(jsonPath("$.email").value("marina@exemplo.com"))
+                .andExpect(jsonPath("$.status").value("LEAD"));
+
+        mvc.perform(get("/api/v1/deals/" + created.get("dealId").asLong()).header(HttpHeaders.AUTHORIZATION, token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Diagnóstico: Página Profissional (One Page)"))
+                .andExpect(jsonPath("$.stage").value("PROSPECT"))
+                .andExpect(jsonPath("$.source").value("WEBSITE"))
+                .andExpect(jsonPath("$.notes").value(org.hamcrest.Matchers.containsString("Placar: Presença: 12")));
+
+        mvc.perform(get("/api/v1/integrations/leads").header(HttpHeaders.AUTHORIZATION, token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].formName").value("leads-diagnostico"))
+                .andExpect(jsonPath("$[0].customerName").value("Marina Costa"));
+
+        mvc.perform(get("/api/v1/integrations/status").header(HttpHeaders.AUTHORIZATION, token))
+                .andExpect(jsonPath("$.netlifyEnabled").value(true));
+    }
+
+    @Test
+    void netlifyLeadWithInvalidEmailKeepsOnlyValidData() throws Exception {
+        String body = NetlifyTestSupport.submission("envio-email-invalido", "Paulo Reis", "11977776666", "nao-e-email");
+        JsonNode created = json.readTree(mvc.perform(post("/api/v1/integrations/netlify/forms")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Webhook-Signature", NetlifyTestSupport.sign(body))
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString());
+
+        String token = login("demo@crmpro.dev", "demo1234");
+        mvc.perform(get("/api/v1/customers/" + created.get("customerId").asLong()).header(HttpHeaders.AUTHORIZATION, token))
+                .andExpect(jsonPath("$.email").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.phone").value("(11) 97777-6666"));
     }
 
     private JsonNode summary(String token) throws Exception {

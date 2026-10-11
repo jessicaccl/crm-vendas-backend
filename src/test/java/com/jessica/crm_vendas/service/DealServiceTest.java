@@ -77,7 +77,7 @@ class DealServiceTest {
         });
 
         DealResponseDTO created = service.create(new DealRequestDTO(
-                " App de pedidos ", 1L, new BigDecimal("38000"), null, null, null, null));
+                " App de pedidos ", 1L, new BigDecimal("38000"), null, null, null, null, null));
 
         assertThat(created.title()).isEqualTo("App de pedidos");
         assertThat(created.stage()).isEqualTo(DealStage.PROSPECT);
