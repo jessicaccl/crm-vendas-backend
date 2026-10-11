@@ -12,6 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -50,7 +51,24 @@ public class DemoDataLoader implements CommandLineRunner {
         if (customerRepository.count() > 0) {
             return;
         }
+        seed();
+    }
 
+    /**
+     * Na demo pública, apaga o que os visitantes mudaram e recria os exemplos
+     * (DEMO_RESET_CRON, ex.: todo dia às 4h). Desligado por padrão.
+     */
+    @Scheduled(cron = "${app.demo-reset-cron}", zone = "${app.timezone}")
+    @Transactional
+    public void resetDemoData() {
+        stageChangeRepository.deleteAllInBatch();
+        dealRepository.deleteAllInBatch();
+        customerRepository.deleteAllInBatch();
+        seed();
+        log.info("Dados de demonstração restaurados");
+    }
+
+    private void seed() {
         Customer carla = customer("Carla Mendes", "compras@bompreco.com.br", "(11) 98877-1020", "Rede Mercadinho Bom Preço", CustomerStatus.LEAD);
         Customer bruno = customer("Bruno Tavares", "bruno@amigofiel.com.br", "(21) 99654-3311", "Pet Shop Amigo Fiel", CustomerStatus.CUSTOMER);
         Customer helena = customer("Helena Prado", "contato@sorrisoleve.com.br", "(31) 98123-4455", "Clínica Sorriso Leve", CustomerStatus.LEAD);
