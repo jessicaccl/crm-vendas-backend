@@ -25,6 +25,8 @@ import com.jessica.crm_vendas.model.DealStageChange;
 import com.jessica.crm_vendas.repository.CustomerRepository;
 import com.jessica.crm_vendas.repository.DealRepository;
 import com.jessica.crm_vendas.repository.DealStageChangeRepository;
+import com.jessica.crm_vendas.repository.InboundLeadRepository;
+import com.jessica.crm_vendas.repository.OrganizationRepository;
 
 import lombok.RequiredArgsConstructor;
 
@@ -43,15 +45,18 @@ public class DemoDataLoader implements CommandLineRunner {
     private final CustomerRepository customerRepository;
     private final DealRepository dealRepository;
     private final DealStageChangeRepository stageChangeRepository;
+    private final InboundLeadRepository inboundLeadRepository;
+    private final OrganizationRepository organizationRepository;
     private final Clock clock;
 
     @Override
     @Transactional
     public void run(String... args) {
-        if (customerRepository.count() > 0) {
+        Long demo = demoOrganizationId();
+        if (customerRepository.countByOrganizationId(demo) > 0) {
             return;
         }
-        seed();
+        seed(demo);
     }
 
     /**
@@ -61,14 +66,22 @@ public class DemoDataLoader implements CommandLineRunner {
     @Scheduled(cron = "${app.demo-reset-cron}", zone = "${app.timezone}")
     @Transactional
     public void resetDemoData() {
-        stageChangeRepository.deleteAllInBatch();
-        dealRepository.deleteAllInBatch();
-        customerRepository.deleteAllInBatch();
-        seed();
+        // Só a organização Demo: os dados das empresas reais nunca são tocados
+        Long demo = demoOrganizationId();
+        inboundLeadRepository.deleteAllOfOrganization(demo);
+        dealRepository.deleteAllOfOrganization(demo);
+        customerRepository.deleteAllOfOrganization(demo);
+        seed(demo);
         log.info("Dados de demonstração restaurados");
     }
 
-    private void seed() {
+    private Long demoOrganizationId() {
+        return organizationRepository.findBySlug(UserInitializer.DEMO_SLUG)
+                .orElseThrow(() -> new IllegalStateException("Organização demo não encontrada"))
+                .getId();
+    }
+
+    private void seed(Long organizationId) {
         Customer carla = customer("Carla Mendes", "compras@bompreco.com.br", "(11) 98877-1020", "Rede Mercadinho Bom Preço", CustomerStatus.LEAD);
         Customer bruno = customer("Bruno Tavares", "bruno@amigofiel.com.br", "(21) 99654-3311", "Pet Shop Amigo Fiel", CustomerStatus.CUSTOMER);
         Customer helena = customer("Helena Prado", "contato@sorrisoleve.com.br", "(31) 98123-4455", "Clínica Sorriso Leve", CustomerStatus.LEAD);
@@ -77,7 +90,9 @@ public class DemoDataLoader implements CommandLineRunner {
         Customer paulo = customer("Paulo Siqueira", "paulo@nortesul.com.br", "(85) 98544-1290", "Distribuidora Norte Sul", CustomerStatus.LEAD);
         Customer lucia = customer("Lúcia Andrade", "lucia@pequenosaber.com.br", "(51) 99231-0098", "Escola Pequeno Saber", CustomerStatus.CUSTOMER);
         Customer fernanda = customer("Fernanda Rocha", "fernanda@larcerto.com.br", "(11) 96612-4410", "Imobiliária Lar Certo", CustomerStatus.INACTIVE);
-        customerRepository.saveAll(List.of(carla, bruno, helena, marcos, rita, paulo, lucia, fernanda));
+        List<Customer> customers = List.of(carla, bruno, helena, marcos, rita, paulo, lucia, fernanda);
+        customers.forEach(customer -> customer.setOrganizationId(organizationId));
+        customerRepository.saveAll(customers);
 
         Instant now = clock.instant();
         ZonedDateTime today = ZonedDateTime.now(clock);
@@ -105,6 +120,7 @@ public class DemoDataLoader implements CommandLineRunner {
             deal("Chatbot de atendimento", fernanda, "8900", DealStage.LOST, DealSource.WHATSAPP, daysAgo(now, 20), null, "Preço acima do orçamento"),
             deal("Tour virtual dos imóveis", fernanda, "5400", DealStage.LOST, DealSource.WEBSITE, daysAgo(now, 40), null, "Sem resposta do cliente")
         );
+        deals.forEach(deal -> deal.setOrganizationId(organizationId));
         dealRepository.saveAll(deals);
         stageChangeRepository.saveAll(deals.stream()
                 .map(deal -> new DealStageChange(deal, null, deal.getStage(), deal.getStageChangedAt()))

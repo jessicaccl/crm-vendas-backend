@@ -71,9 +71,12 @@ São públicos apenas o login, o `/actuator/health` e a documentação.
 | PATCH | `/api/v1/deals/{id}/stage` | Move de etapa, grava o histórico e publica o evento |
 | DELETE | `/api/v1/deals/{id}` | Exclui |
 | GET | `/api/v1/reports/summary` | Indicadores: em aberto, ganho no mês, conversão em 90 dias, parados |
-| POST | `/api/v1/integrations/netlify/forms` | Webhook do Netlify Forms (autenticado por assinatura) |
-| GET | `/api/v1/integrations/leads` | Últimos leads recebidos por integrações |
-| GET | `/api/v1/integrations/status` | Integrações ativas no ambiente |
+| POST | `/api/v1/integrations/netlify/forms/{organização}` | Webhook do Netlify Forms (autenticado pela assinatura da organização) |
+| POST | `/api/v1/integrations/netlify/secret` | Gera a chave do webhook da organização (administradoras) |
+| GET | `/api/v1/integrations/leads` | Últimos leads recebidos pela organização |
+| GET | `/api/v1/integrations/status` | Situação das integrações da organização |
+
+Todas as rotas logadas retornam **apenas dados da organização do usuário**.
 
 Status do cliente: `LEAD`, `CUSTOMER`, `INACTIVE`.
 Etapas do negócio: `PROSPECT`, `QUALIFIED`, `PROPOSAL`, `WON`, `LOST` (perder exige `lostReason`, senão responde 422).
@@ -92,13 +95,32 @@ Erros seguem o padrão [ProblemDetail (RFC 9457)](https://www.rfc-editor.org/rfc
 ## Modelo
 
 ```
-Cliente 1 ── N Negócio 1 ── N Mudança de etapa
-Lead recebido (integração) ──> Cliente + Negócio
-Usuário (login)
+Organização 1 ── N Usuário
+            1 ── N Cliente 1 ── N Negócio 1 ── N Mudança de etapa
+            1 ── N Lead recebido (integração) ──> Cliente + Negócio
 ```
 
 Toda mudança de etapa gera um registro em `tb_deal_stage_changes` e publica um `DealStageChangedEvent`.
-Esse evento é o ponto de extensão para integrações: na fase 5 um listener envia webhooks com ele.
+Esse evento é o ponto de extensão para webhooks de saída.
+
+## Multiempresa (multi-tenant)
+
+Um único deploy atende várias empresas, com os dados separados por **organização**:
+
+- **O token de login carrega a organização** (claim `org`). O `TenantContext` lê esse valor e **toda consulta**
+  (listas, buscas, indicadores, edição, exclusão) filtra por ele.
+- **Dados de outra organização respondem 404**, como se não existissem. Também não dá para ligar um negócio
+  a um cliente de outra empresa.
+- **E-mail de cliente é único por organização** (`unique (organization_id, email)`).
+- **Webhooks não têm login:** a organização vem do endereço (`/netlify/forms/{slug}`) e é confirmada pela
+  assinatura com a chave daquela organização.
+- **A organização Demo** tem dados fictícios e login público, não aceita integrações, e só ela é restaurada
+  pelo `DEMO_RESET_CRON`.
+- **Cobertura:** o `ApiIntegrationTest` verifica o isolamento com PostgreSQL real. A Demo não lê, não edita,
+  não move e não referencia dados da Unic, e os indicadores de cada empresa contam só os próprios negócios.
+
+As organizações iniciais são criadas na subida da API: `demo` (usuário `DEMO_USER_*`) e a da administradora
+(`ADMIN_ORG_NAME` / `ADMIN_ORG_SLUG`, usuária `ADMIN_EMAIL` / `ADMIN_PASSWORD`).
 
 ## Integração: leads do formulário do Netlify
 
@@ -106,8 +128,8 @@ O [quiz de diagnóstico da Unic Studio](https://github.com/jessicaccl/unic-quiz-
 Netlify Forms. Um **outgoing webhook** do Netlify envia o envio para o CRM, que:
 
 1. **Confere a assinatura** `X-Webhook-Signature`: um JWT HS256 com `iss=netlify` e o `sha256` do corpo,
-   assinado com o mesmo segredo configurado no Netlify e em `NETLIFY_WEBHOOK_SECRET`. Sem ela, responde 401.
-2. **Ignora reenvios** do mesmo envio (chave única `provider + id do envio`).
+   assinado com a chave que a organização gerou na tela **Integrações** e colou no Netlify. Sem ela, responde 401.
+2. **Ignora reenvios** do mesmo envio (chave única `organização + provider + id do envio`).
 3. **Encontra ou cria o contato** pelo e-mail ou pelo WhatsApp, ignorando a formatação do número,
    e completa o cadastro sem sobrescrever o que já existe.
 4. **Abre um negócio** "Diagnóstico: \<resultado\>" em Prospecto, com o placar nas observações,
@@ -115,23 +137,10 @@ Netlify Forms. Um **outgoing webhook** do Netlify envia o envio para o CRM, que:
 5. **Guarda o envio original** em `tb_inbound_leads` (JSONB) para auditoria.
 
 ```
-Quiz (React) ─▶ Netlify Forms ─webhook assinado─▶ API ─▶ Cliente (Lead) + Negócio em Prospecto
+Quiz (React) ─▶ Netlify Forms ─webhook assinado─▶ API /netlify/forms/unic ─▶ Cliente (Lead) + Negócio em Prospecto
 ```
 
-Sem `NETLIFY_WEBHOOK_SECRET`, a integração fica desligada (é o caso da demo pública).
-
-## Ambientes
-
-O mesmo código roda em dois ambientes, separados por configuração e por banco:
-
-| | Demo pública | CRM da Unic |
-|---|---|---|
-| Dados | fictícios, restaurados todo dia | reais (leads do diagnóstico) |
-| Login | usuário demo aberto + administradora | só a administradora |
-| Integração Netlify | desligada | ligada |
-| Configuração | `DEMO_DATA=true` | `DEMO_DATA=false`, `DEMO_USER_ENABLED=false`, `NETLIFY_WEBHOOK_SECRET` |
-
-Assim os dados de clientes reais nunca ficam visíveis para quem usa o login de demonstração (LGPD).
+Enquanto a organização não gera a chave, o webhook dela responde 404.
 
 ## Deploy
 
@@ -148,7 +157,7 @@ service/      regras de negócio
 repository/   acesso a dados e filtros (Specifications)
 model/        entidades JPA
 dto/          contratos de entrada e saída
-security/     JWT, regras de acesso e respostas 401
+security/     JWT, organização do pedido (TenantContext), regras de acesso e respostas 401
 integration/  entrada de leads externos (webhook do Netlify, assinatura, deduplicação)
 exception/    erros de domínio e handler global
 event/        eventos de domínio (mudança de etapa)
@@ -161,6 +170,7 @@ db/migration  scripts versionados do Flyway
 - [x] Fase 1: base (configuração segura, DTOs, erros padronizados, paginação, Flyway, Docker)
 - [x] Fase 2: negócios, histórico de etapas e indicadores do funil
 - [x] Fase 3: login (JWT), testes de integração, CI, deploy e demo online
-- [x] Fase 4: integração com o formulário do Netlify e ambiente real separado da demo
-- [ ] Fase 5: painel de resultados
-- [ ] Fase 6: ficha do cliente com atividades e tarefas, webhooks de saída
+- [x] Fase 4: integração com o formulário do Netlify
+- [x] Fase 5: multiempresa (organizações isoladas em um único deploy)
+- [ ] Fase 6: painel de resultados
+- [ ] Fase 7: ficha do cliente com atividades e tarefas, webhooks de saída

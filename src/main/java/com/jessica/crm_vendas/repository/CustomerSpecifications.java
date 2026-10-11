@@ -14,10 +14,11 @@ public final class CustomerSpecifications {
 
     private CustomerSpecifications() {}
 
-    /** Busca por texto (nome, e-mail ou empresa) e filtro opcional de status. */
-    public static Specification<Customer> search(String text, CustomerStatus status) {
+    /** Clientes da organização, com busca por texto (nome, e-mail ou empresa) e filtro opcional de status. */
+    public static Specification<Customer> search(Long organizationId, String text, CustomerStatus status) {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
+            predicates.add(cb.equal(root.get("organizationId"), organizationId));
 
             if (status != null) {
                 predicates.add(cb.equal(root.get("status"), status));

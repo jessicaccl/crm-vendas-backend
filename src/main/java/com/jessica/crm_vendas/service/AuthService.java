@@ -9,7 +9,9 @@ import com.jessica.crm_vendas.dto.LoginRequestDTO;
 import com.jessica.crm_vendas.dto.LoginResponseDTO;
 import com.jessica.crm_vendas.dto.UserResponseDTO;
 import com.jessica.crm_vendas.exception.ResourceNotFoundException;
+import com.jessica.crm_vendas.model.Organization;
 import com.jessica.crm_vendas.model.User;
+import com.jessica.crm_vendas.repository.OrganizationRepository;
 import com.jessica.crm_vendas.repository.UserRepository;
 import com.jessica.crm_vendas.security.TokenService;
 
@@ -21,6 +23,7 @@ public class AuthService {
 
     private final AuthenticationManager authenticationManager;
     private final UserRepository userRepository;
+    private final OrganizationRepository organizationRepository;
     private final TokenService tokenService;
 
     /** Confere e-mail e senha (lança BadCredentialsException se não baterem) e devolve um token. */
@@ -31,16 +34,22 @@ public class AuthService {
 
         User user = findByEmail(email);
         TokenService.IssuedToken token = tokenService.issue(user);
-        return new LoginResponseDTO(token.value(), token.expiresAt(), UserResponseDTO.from(user));
+        return new LoginResponseDTO(token.value(), token.expiresAt(), UserResponseDTO.from(user, organizationOf(user)));
     }
 
     @Transactional(readOnly = true)
     public UserResponseDTO me(String email) {
-        return UserResponseDTO.from(findByEmail(email));
+        User user = findByEmail(email);
+        return UserResponseDTO.from(user, organizationOf(user));
     }
 
     private User findByEmail(String email) {
         return userRepository.findByEmail(email)
                 .orElseThrow(() -> new ResourceNotFoundException("Usuário não encontrado"));
+    }
+
+    private Organization organizationOf(User user) {
+        return organizationRepository.findById(user.getOrganizationId())
+                .orElseThrow(() -> new ResourceNotFoundException("Organização não encontrada"));
     }
 }

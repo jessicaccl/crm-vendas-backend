@@ -103,55 +103,44 @@ Pronto: abra o endereço da Vercel e clique em **Entrar como demo**.
 
 ---
 
-## 5. Segundo ambiente: CRM da Unic (dados reais)
+## 5. Sua empresa no mesmo deploy (multiempresa)
 
-A demo pública tem um login aberto, então os leads reais vão para **outro ambiente**, com banco próprio
-e sem usuário demo. O código é o mesmo; muda a configuração.
+O CRM é multiempresa: a demo pública e os dados reais da sua empresa ficam **no mesmo serviço e no mesmo
+banco**, separados por organização. Quem entra com o login demo nunca vê os dados da sua empresa.
 
-1. **Neon:** no mesmo projeto, abra **Databases → New database** e crie `crm_unic`
-   (mesmo branch e mesmo dono do banco da demo).
-2. **Render:** o `render.yaml` já descreve o serviço `crm-unic-api`. Depois do merge, o Blueprint cria o serviço;
-   em **Environment** preencha:
+No Render, abra o serviço → **Environment** → **Add variable** e defina:
 
-   | Variável | Valor |
-   |---|---|
-   | `DB_URL` | o mesmo da demo, trocando o nome do banco: `jdbc:postgresql://HOST/crm_unic?sslmode=require` |
-   | `DB_USERNAME`, `DB_PASSWORD` | os mesmos da demo |
-   | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | seu login no CRM real |
-   | `CORS_ALLOWED_ORIGINS` | endereço do frontend do CRM da Unic (passo 3) |
+| Variável | Valor |
+|---|---|
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | seu login no CRM |
+| `ADMIN_ORG_NAME` | nome da sua empresa, ex.: `Unic Studio` |
+| `ADMIN_ORG_SLUG` | identificador curto, sem espaços nem acentos, ex.: `unic` (vai no endereço do webhook) |
 
-   `DEMO_DATA=false` e `DEMO_USER_ENABLED=false` já vêm do `render.yaml`, e o `NETLIFY_WEBHOOK_SECRET` é gerado
-   automaticamente. Salve e faça um **Manual Deploy**.
-3. **Vercel:** crie **outro projeto** a partir do mesmo repositório `crm-frontend`, com:
-
-   | Variável | Valor |
-   |---|---|
-   | `VITE_API_URL` | `https://crm-unic-api-XXXX.onrender.com/api/v1` |
-   | `VITE_DEMO_MODE` | `false` (esconde o acesso de demonstração na tela de login) |
-
-4. Volte ao `crm-unic-api` e coloque o endereço desse frontend em `CORS_ALLOWED_ORIGINS`.
+Salve com **Save, rebuild, and deploy**. Na subida, a API cria a organização e coloca a sua conta nela;
+se a conta já existia na Demo, ela é movida para a sua empresa.
 
 ## 6. Webhook no Netlify (leads do diagnóstico)
 
-1. No Render, abra `crm-unic-api` → **Environment** e copie o valor de `NETLIFY_WEBHOOK_SECRET`.
+1. Entre no CRM com a **sua conta** e abra **Integrações**. Copie o **endereço do webhook**
+   (termina com `/netlify/forms/unic`) e clique em **Gerar chave**. Copie a chave na hora: ela só é mostrada uma vez.
 2. No Netlify, abra o site do quiz → **Site configuration → Notifications → Form submission notifications →
    Add notification → Outgoing webhook**:
 
    | Campo | Valor |
    |---|---|
    | Event to listen for | New form submission |
-   | URL to notify | `https://crm-unic-api-XXXX.onrender.com/api/v1/integrations/netlify/forms` |
+   | URL to notify | o endereço copiado no passo 1 |
    | Form | `leads-diagnostico` |
-   | JWS secret token | o valor copiado no passo 1 |
+   | JWS secret token | a chave gerada no passo 1 |
 
-3. Responda o quiz uma vez. O lead aparece no CRM em **Integrações** e no funil, em **Prospecto**.
+3. Responda o quiz uma vez. O lead aparece em **Integrações** e no funil da sua empresa, em **Prospecto**.
 
-O endereço exato do webhook também aparece na tela **Integrações** do CRM, com botão de copiar.
+Se a chave vazar, gere outra na mesma tela. A anterior deixa de funcionar na hora, e é só colar a nova no Netlify.
 
 > **API dormindo:** no plano gratuito do Render a API dorme sem uso e leva até 1 minuto para acordar.
-> Para não arriscar perder um webhook nesse intervalo, mantenha só o `crm-unic-api` acordado com um monitor
-> gratuito (ex.: [UptimeRobot](https://uptimerobot.com) ou [cron-job.org](https://cron-job.org)) chamando
-> `https://crm-unic-api-XXXX.onrender.com/actuator/health` a cada 10 minutos.
+> Para não arriscar perder um webhook nesse intervalo, mantenha a API acordada com um monitor gratuito
+> (ex.: [UptimeRobot](https://uptimerobot.com) ou [cron-job.org](https://cron-job.org)) chamando
+> `https://SEU-SERVICO.onrender.com/actuator/health` a cada 10 minutos.
 > De qualquer forma, todo envio continua guardado também no painel **Forms** do Netlify.
 
 ---

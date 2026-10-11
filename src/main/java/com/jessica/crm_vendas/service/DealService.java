@@ -23,6 +23,7 @@ import com.jessica.crm_vendas.repository.CustomerRepository;
 import com.jessica.crm_vendas.repository.DealRepository;
 import com.jessica.crm_vendas.repository.DealSpecifications;
 import com.jessica.crm_vendas.repository.DealStageChangeRepository;
+import com.jessica.crm_vendas.security.TenantContext;
 
 import lombok.RequiredArgsConstructor;
 
@@ -35,10 +36,11 @@ public class DealService {
     private final DealStageChangeRepository stageChangeRepository;
     private final ApplicationEventPublisher events;
     private final Clock clock;
+    private final TenantContext tenant;
 
     @Transactional(readOnly = true)
     public List<DealResponseDTO> list(String text, Long customerId) {
-        return repository.findAll(DealSpecifications.search(text, customerId), Sort.by(Sort.Direction.DESC, "stageChangedAt"))
+        return repository.findAll(DealSpecifications.search(tenant.organizationId(), text, customerId), Sort.by(Sort.Direction.DESC, "stageChangedAt"))
                 .stream()
                 .map(DealResponseDTO::from)
                 .toList();
@@ -52,6 +54,7 @@ public class DealService {
     @Transactional
     public DealResponseDTO create(DealRequestDTO data) {
         Deal deal = new Deal();
+        deal.setOrganizationId(tenant.organizationId());
         applyFields(deal, data);
         DealStage stage = data.stage() == null ? DealStage.PROSPECT : data.stage();
         enterStage(deal, stage, data.lostReason());
@@ -120,12 +123,12 @@ public class DealService {
     }
 
     private Customer findCustomer(Long customerId) {
-        return customerRepository.findById(customerId)
+        return customerRepository.findByIdAndOrganizationId(customerId, tenant.organizationId())
                 .orElseThrow(() -> new ResourceNotFoundException("Cliente não encontrado com o ID: " + customerId));
     }
 
     private Deal findOrThrow(Long id) {
-        return repository.findById(id)
+        return repository.findByIdAndOrganizationId(id, tenant.organizationId())
                 .orElseThrow(() -> new ResourceNotFoundException("Negócio não encontrado com o ID: " + id));
     }
 }

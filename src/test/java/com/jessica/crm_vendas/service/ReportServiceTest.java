@@ -19,6 +19,7 @@ import com.jessica.crm_vendas.dto.SummaryReportDTO;
 import com.jessica.crm_vendas.model.DealStage;
 import com.jessica.crm_vendas.repository.DealRepository;
 import com.jessica.crm_vendas.repository.DealTotals;
+import com.jessica.crm_vendas.security.TenantContext;
 
 @ExtendWith(MockitoExtension.class)
 class ReportServiceTest {
@@ -28,24 +29,29 @@ class ReportServiceTest {
     private static final Instant NOW = Instant.parse("2026-10-15T15:00:00Z");
     private static final Instant OCTOBER_START = Instant.parse("2026-10-01T03:00:00Z");
     private static final Instant SEPTEMBER_START = Instant.parse("2026-09-01T03:00:00Z");
+    private static final Long ORG = 1L;
 
     @Mock
     private DealRepository repository;
 
+    @Mock
+    private TenantContext tenant;
+
     @Test
     void summaryUsesBusinessTimezoneForMonthBoundaries() {
-        ReportService service = new ReportService(repository, Clock.fixed(NOW, SAO_PAULO));
+        ReportService service = new ReportService(repository, Clock.fixed(NOW, SAO_PAULO), tenant);
+        when(tenant.organizationId()).thenReturn(ORG);
 
-        when(repository.totalsByStages(DealStage.OPEN)).thenReturn(new DealTotals(8L, new BigDecimal("111900")));
-        when(repository.totalsClosedBetween(DealStage.WON, OCTOBER_START, NOW))
+        when(repository.totalsByStages(ORG, DealStage.OPEN)).thenReturn(new DealTotals(8L, new BigDecimal("111900")));
+        when(repository.totalsClosedBetween(ORG, DealStage.WON, OCTOBER_START, NOW))
                 .thenReturn(new DealTotals(2L, new BigDecimal("30800")));
-        when(repository.totalsClosedBetween(DealStage.WON, SEPTEMBER_START, OCTOBER_START))
+        when(repository.totalsClosedBetween(ORG, DealStage.WON, SEPTEMBER_START, OCTOBER_START))
                 .thenReturn(new DealTotals(2L, new BigDecimal("24200")));
-        when(repository.totalsClosedBetween(eq(DealStage.WON), eq(NOW.minusSeconds(90L * 86_400)), eq(NOW)))
+        when(repository.totalsClosedBetween(eq(ORG), eq(DealStage.WON), eq(NOW.minusSeconds(90L * 86_400)), eq(NOW)))
                 .thenReturn(new DealTotals(3L, new BigDecimal("40000")));
-        when(repository.totalsClosedBetween(eq(DealStage.LOST), any(), eq(NOW)))
+        when(repository.totalsClosedBetween(eq(ORG), eq(DealStage.LOST), any(), eq(NOW)))
                 .thenReturn(new DealTotals(1L, new BigDecimal("8900")));
-        when(repository.countByStageInAndStageChangedAtBefore(eq(DealStage.OPEN), any())).thenReturn(3L);
+        when(repository.countByOrganizationIdAndStageInAndStageChangedAtBefore(eq(ORG), eq(DealStage.OPEN), any())).thenReturn(3L);
 
         SummaryReportDTO summary = service.summary();
 
@@ -59,10 +65,11 @@ class ReportServiceTest {
 
     @Test
     void conversionIsNullWithoutClosedDeals() {
-        ReportService service = new ReportService(repository, Clock.fixed(NOW, SAO_PAULO));
+        ReportService service = new ReportService(repository, Clock.fixed(NOW, SAO_PAULO), tenant);
+        when(tenant.organizationId()).thenReturn(ORG);
         DealTotals empty = new DealTotals(0L, null);
-        when(repository.totalsByStages(any())).thenReturn(empty);
-        when(repository.totalsClosedBetween(any(), any(), any())).thenReturn(empty);
+        when(repository.totalsByStages(eq(ORG), any())).thenReturn(empty);
+        when(repository.totalsClosedBetween(eq(ORG), any(), any(), any())).thenReturn(empty);
 
         SummaryReportDTO summary = service.summary();
 

@@ -14,6 +14,7 @@ import com.jessica.crm_vendas.model.CustomerStatus;
 import com.jessica.crm_vendas.repository.CustomerRepository;
 import com.jessica.crm_vendas.repository.CustomerSpecifications;
 import com.jessica.crm_vendas.repository.DealRepository;
+import com.jessica.crm_vendas.security.TenantContext;
 
 import lombok.RequiredArgsConstructor;
 
@@ -23,10 +24,11 @@ public class CustomerService {
 
     private final CustomerRepository repository;
     private final DealRepository dealRepository;
+    private final TenantContext tenant;
 
     @Transactional(readOnly = true)
     public Page<CustomerResponseDTO> search(String text, CustomerStatus status, Pageable pageable) {
-        return repository.findAll(CustomerSpecifications.search(text, status), pageable)
+        return repository.findAll(CustomerSpecifications.search(tenant.organizationId(), text, status), pageable)
                 .map(CustomerResponseDTO::from);
     }
 
@@ -37,12 +39,14 @@ public class CustomerService {
 
     @Transactional
     public CustomerResponseDTO create(CustomerRequestDTO data) {
+        Long organizationId = tenant.organizationId();
         String email = normalizeEmail(data.email());
-        if (email != null && repository.existsByEmail(email)) {
+        if (email != null && repository.existsByOrganizationIdAndEmail(organizationId, email)) {
             throw new ConflictException("E-mail já cadastrado no sistema!");
         }
 
         Customer customer = new Customer();
+        customer.setOrganizationId(organizationId);
         apply(customer, data, email);
         return CustomerResponseDTO.from(repository.save(customer));
     }
@@ -52,7 +56,7 @@ public class CustomerService {
         Customer customer = findOrThrow(id);
 
         String email = normalizeEmail(data.email());
-        if (email != null && repository.existsByEmailAndIdNot(email, id)) {
+        if (email != null && repository.existsByOrganizationIdAndEmailAndIdNot(customer.getOrganizationId(), email, id)) {
             throw new ConflictException("E-mail já cadastrado em outro cliente!");
         }
 
@@ -69,8 +73,9 @@ public class CustomerService {
         repository.delete(customer);
     }
 
+    /** Cliente de outra organização responde "não encontrado", como se não existisse. */
     private Customer findOrThrow(Long id) {
-        return repository.findById(id)
+        return repository.findByIdAndOrganizationId(id, tenant.organizationId())
                 .orElseThrow(() -> new ResourceNotFoundException("Cliente não encontrado com o ID: " + id));
     }
 

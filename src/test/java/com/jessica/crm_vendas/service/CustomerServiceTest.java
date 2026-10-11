@@ -3,12 +3,15 @@ package com.jessica.crm_vendas.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Optional;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -23,9 +26,12 @@ import com.jessica.crm_vendas.model.Customer;
 import com.jessica.crm_vendas.model.CustomerStatus;
 import com.jessica.crm_vendas.repository.CustomerRepository;
 import com.jessica.crm_vendas.repository.DealRepository;
+import com.jessica.crm_vendas.security.TenantContext;
 
 @ExtendWith(MockitoExtension.class)
 class CustomerServiceTest {
+
+    private static final Long ORG = 1L;
 
     @Mock
     private CustomerRepository repository;
@@ -33,12 +39,20 @@ class CustomerServiceTest {
     @Mock
     private DealRepository dealRepository;
 
+    @Mock
+    private TenantContext tenant;
+
     @InjectMocks
     private CustomerService service;
 
+    @BeforeEach
+    void setUp() {
+        lenient().when(tenant.organizationId()).thenReturn(ORG);
+    }
+
     @Test
-    void createUsesLeadStatusAndNormalizesEmail() {
-        when(repository.existsByEmail("ana@empresa.com")).thenReturn(false);
+    void createUsesLeadStatusNormalizesEmailAndSetsOrganization() {
+        when(repository.existsByOrganizationIdAndEmail(ORG, "ana@empresa.com")).thenReturn(false);
         when(repository.save(any(Customer.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         CustomerResponseDTO created = service.create(
@@ -48,11 +62,12 @@ class CustomerServiceTest {
         assertThat(created.email()).isEqualTo("ana@empresa.com");
         assertThat(created.phone()).isNull();
         assertThat(created.status()).isEqualTo(CustomerStatus.LEAD);
+        verify(repository).save(argThat(customer -> ORG.equals(customer.getOrganizationId())));
     }
 
     @Test
-    void createRejectsDuplicatedEmail() {
-        when(repository.existsByEmail("ana@empresa.com")).thenReturn(true);
+    void createRejectsDuplicatedEmailInSameOrganization() {
+        when(repository.existsByOrganizationIdAndEmail(ORG, "ana@empresa.com")).thenReturn(true);
 
         assertThatThrownBy(() -> service.create(
                 new CustomerRequestDTO("Ana", "ana@empresa.com", null, null, null)))
@@ -64,10 +79,11 @@ class CustomerServiceTest {
     void updateAllowsKeepingOwnEmail() {
         Customer existing = new Customer();
         existing.setId(7L);
+        existing.setOrganizationId(ORG);
         existing.setName("Ana");
         existing.setEmail("ana@empresa.com");
-        when(repository.findById(7L)).thenReturn(Optional.of(existing));
-        when(repository.existsByEmailAndIdNot("ana@empresa.com", 7L)).thenReturn(false);
+        when(repository.findByIdAndOrganizationId(7L, ORG)).thenReturn(Optional.of(existing));
+        when(repository.existsByOrganizationIdAndEmailAndIdNot(ORG, "ana@empresa.com", 7L)).thenReturn(false);
         when(repository.saveAndFlush(existing)).thenReturn(existing);
 
         CustomerResponseDTO updated = service.update(7L,
@@ -78,8 +94,8 @@ class CustomerServiceTest {
     }
 
     @Test
-    void getByIdThrowsWhenMissing() {
-        when(repository.findById(99L)).thenReturn(Optional.empty());
+    void customerOfAnotherOrganizationIsNotFound() {
+        when(repository.findByIdAndOrganizationId(99L, ORG)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.getById(99L))
                 .isInstanceOf(ResourceNotFoundException.class)

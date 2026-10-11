@@ -11,6 +11,7 @@ import com.jessica.crm_vendas.dto.SummaryReportDTO;
 import com.jessica.crm_vendas.model.DealStage;
 import com.jessica.crm_vendas.repository.DealRepository;
 import com.jessica.crm_vendas.repository.DealTotals;
+import com.jessica.crm_vendas.security.TenantContext;
 
 import lombok.RequiredArgsConstructor;
 
@@ -24,22 +25,24 @@ public class ReportService {
 
     private final DealRepository repository;
     private final Clock clock;
+    private final TenantContext tenant;
 
     @Transactional(readOnly = true)
     public SummaryReportDTO summary() {
+        Long org = tenant.organizationId();
         ZonedDateTime now = ZonedDateTime.now(clock);
         Instant monthStart = now.toLocalDate().withDayOfMonth(1).atStartOfDay(now.getZone()).toInstant();
         Instant lastMonthStart = now.toLocalDate().withDayOfMonth(1).minusMonths(1).atStartOfDay(now.getZone()).toInstant();
         Instant windowStart = now.minusDays(CONVERSION_WINDOW_DAYS).toInstant();
         Instant end = now.toInstant();
 
-        DealTotals open = repository.totalsByStages(DealStage.OPEN);
-        DealTotals wonThisMonth = repository.totalsClosedBetween(DealStage.WON, monthStart, end);
-        DealTotals wonLastMonth = repository.totalsClosedBetween(DealStage.WON, lastMonthStart, monthStart);
-        long wonInWindow = repository.totalsClosedBetween(DealStage.WON, windowStart, end).count();
-        long lostInWindow = repository.totalsClosedBetween(DealStage.LOST, windowStart, end).count();
-        long stalled = repository.countByStageInAndStageChangedAtBefore(
-                DealStage.OPEN, now.minusDays(STALLED_DAYS).toInstant());
+        DealTotals open = repository.totalsByStages(org, DealStage.OPEN);
+        DealTotals wonThisMonth = repository.totalsClosedBetween(org, DealStage.WON, monthStart, end);
+        DealTotals wonLastMonth = repository.totalsClosedBetween(org, DealStage.WON, lastMonthStart, monthStart);
+        long wonInWindow = repository.totalsClosedBetween(org, DealStage.WON, windowStart, end).count();
+        long lostInWindow = repository.totalsClosedBetween(org, DealStage.LOST, windowStart, end).count();
+        long stalled = repository.countByOrganizationIdAndStageInAndStageChangedAtBefore(
+                org, DealStage.OPEN, now.minusDays(STALLED_DAYS).toInstant());
 
         long closedInWindow = wonInWindow + lostInWindow;
         Double conversion = closedInWindow == 0 ? null : (double) wonInWindow / closedInWindow;

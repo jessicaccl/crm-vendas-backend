@@ -3,6 +3,7 @@ package com.jessica.crm_vendas.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -33,16 +34,19 @@ import com.jessica.crm_vendas.model.DealStageChange;
 import com.jessica.crm_vendas.repository.CustomerRepository;
 import com.jessica.crm_vendas.repository.DealRepository;
 import com.jessica.crm_vendas.repository.DealStageChangeRepository;
+import com.jessica.crm_vendas.security.TenantContext;
 
 @ExtendWith(MockitoExtension.class)
 class DealServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-10-15T15:00:00Z");
+    private static final Long ORG = 1L;
 
     @Mock private DealRepository repository;
     @Mock private CustomerRepository customerRepository;
     @Mock private DealStageChangeRepository stageChangeRepository;
     @Mock private ApplicationEventPublisher events;
+    @Mock private TenantContext tenant;
 
     private DealService service;
     private Customer customer;
@@ -50,7 +54,8 @@ class DealServiceTest {
     @BeforeEach
     void setUp() {
         service = new DealService(repository, customerRepository, stageChangeRepository, events,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+                Clock.fixed(NOW, ZoneOffset.UTC), tenant);
+        lenient().when(tenant.organizationId()).thenReturn(ORG);
         customer = new Customer();
         customer.setId(1L);
         customer.setName("Carla Mendes");
@@ -69,7 +74,7 @@ class DealServiceTest {
 
     @Test
     void createStartsAsProspectAndRecordsHistory() {
-        when(customerRepository.findById(1L)).thenReturn(Optional.of(customer));
+        when(customerRepository.findByIdAndOrganizationId(1L, ORG)).thenReturn(Optional.of(customer));
         when(repository.save(any(Deal.class))).thenAnswer(invocation -> {
             Deal deal = invocation.getArgument(0);
             deal.setId(10L);
@@ -93,7 +98,7 @@ class DealServiceTest {
     @Test
     void movingToWonClosesTheDealAndPublishesEvent() {
         Deal deal = existingDeal(DealStage.PROPOSAL);
-        when(repository.findById(10L)).thenReturn(Optional.of(deal));
+        when(repository.findByIdAndOrganizationId(10L, ORG)).thenReturn(Optional.of(deal));
         when(repository.saveAndFlush(deal)).thenReturn(deal);
 
         DealResponseDTO moved = service.changeStage(10L, new StageChangeRequestDTO(DealStage.WON, null));
@@ -107,7 +112,7 @@ class DealServiceTest {
     @Test
     void movingToLostRequiresReason() {
         Deal deal = existingDeal(DealStage.PROPOSAL);
-        when(repository.findById(10L)).thenReturn(Optional.of(deal));
+        when(repository.findByIdAndOrganizationId(10L, ORG)).thenReturn(Optional.of(deal));
 
         assertThatThrownBy(() -> service.changeStage(10L, new StageChangeRequestDTO(DealStage.LOST, "  ")))
                 .isInstanceOf(BusinessRuleException.class);
@@ -120,7 +125,7 @@ class DealServiceTest {
         Deal deal = existingDeal(DealStage.LOST);
         deal.setLostReason("Preço");
         deal.setClosedAt(NOW.minusSeconds(3600));
-        when(repository.findById(10L)).thenReturn(Optional.of(deal));
+        when(repository.findByIdAndOrganizationId(10L, ORG)).thenReturn(Optional.of(deal));
         when(repository.saveAndFlush(deal)).thenReturn(deal);
 
         DealResponseDTO moved = service.changeStage(10L, new StageChangeRequestDTO(DealStage.QUALIFIED, null));
@@ -133,7 +138,7 @@ class DealServiceTest {
     void droppingOnTheSameStageChangesNothing() {
         Deal deal = existingDeal(DealStage.QUALIFIED);
         Instant before = deal.getStageChangedAt();
-        when(repository.findById(10L)).thenReturn(Optional.of(deal));
+        when(repository.findByIdAndOrganizationId(10L, ORG)).thenReturn(Optional.of(deal));
         when(repository.saveAndFlush(deal)).thenReturn(deal);
 
         service.changeStage(10L, new StageChangeRequestDTO(DealStage.QUALIFIED, null));

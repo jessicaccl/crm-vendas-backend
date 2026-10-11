@@ -3,13 +3,16 @@ package com.jessica.crm_vendas.integration;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
 import java.time.Clock;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
 import org.springframework.data.domain.PageRequest;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,6 +21,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jessica.crm_vendas.dto.DealRequestDTO;
 import com.jessica.crm_vendas.dto.DealResponseDTO;
 import com.jessica.crm_vendas.dto.InboundLeadDTO;
+import com.jessica.crm_vendas.dto.IntegrationStatusDTO;
 import com.jessica.crm_vendas.dto.LeadIntakeResultDTO;
 import com.jessica.crm_vendas.exception.BusinessRuleException;
 import com.jessica.crm_vendas.exception.InvalidSignatureException;
@@ -29,46 +33,57 @@ import com.jessica.crm_vendas.model.CustomerStatus;
 import com.jessica.crm_vendas.model.DealSource;
 import com.jessica.crm_vendas.model.DealStage;
 import com.jessica.crm_vendas.model.InboundLead;
+import com.jessica.crm_vendas.model.Organization;
 import com.jessica.crm_vendas.repository.CustomerRepository;
 import com.jessica.crm_vendas.repository.DealRepository;
 import com.jessica.crm_vendas.repository.InboundLeadRepository;
+import com.jessica.crm_vendas.repository.OrganizationRepository;
+import com.jessica.crm_vendas.security.TenantContext;
 import com.jessica.crm_vendas.service.DealService;
 
 import lombok.RequiredArgsConstructor;
 
 /**
- * Transforma um envio de formulário em Lead + Negócio no funil.
+ * Transforma um envio de formulário em Lead + Negócio no funil da organização dona do webhook.
  * O mesmo contato (pelo e-mail ou pelo WhatsApp) não é duplicado: ganha só um negócio novo.
  */
 @Service
 @RequiredArgsConstructor
 public class LeadIntakeService {
 
+    public static final String NETLIFY_WEBHOOK_PATH = "/api/v1/integrations/netlify/forms/";
+
     static final String NETLIFY = "NETLIFY";
     private static final int TITLE_MAX = 150;
     private static final Pattern VALID_EMAIL = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
+    private static final SecureRandom RANDOM = new SecureRandom();
 
     private final NetlifySignatureVerifier netlifyVerifier;
+    private final OrganizationRepository organizationRepository;
     private final CustomerRepository customerRepository;
     private final DealRepository dealRepository;
     private final InboundLeadRepository inboundLeadRepository;
     private final DealService dealService;
+    private final TenantContext tenant;
     private final ObjectMapper objectMapper;
     private final Clock clock;
 
     @Transactional
-    public LeadIntakeResultDTO receiveNetlify(byte[] body, String signature) {
-        if (!netlifyVerifier.isEnabled()) {
-            throw new ResourceNotFoundException("A integração com o Netlify não está configurada neste ambiente.");
-        }
-        if (!netlifyVerifier.isValid(signature, body)) {
+    public LeadIntakeResultDTO receiveNetlify(String organizationSlug, byte[] body, String signature) {
+        Organization organization = organizationRepository.findBySlug(organizationSlug)
+                .filter(org -> !org.isDemo() && org.getNetlifyWebhookSecret() != null)
+                .orElseThrow(() -> new ResourceNotFoundException("Integração com o Netlify não configurada para esta organização."));
+
+        if (!netlifyVerifier.isValid(organization.getNetlifyWebhookSecret(), signature, body)) {
             throw new InvalidSignatureException("Webhook sem assinatura válida do Netlify.");
         }
 
+        Long org = organization.getId();
         NetlifySubmission submission = NetlifySubmission.from(parse(body));
         String externalId = submission.id() != null ? submission.id() : NetlifySignatureVerifier.sha256Hex(body);
 
-        Optional<InboundLead> alreadyReceived = inboundLeadRepository.findByProviderAndExternalId(NETLIFY, externalId);
+        Optional<InboundLead> alreadyReceived =
+                inboundLeadRepository.findByOrganizationIdAndProviderAndExternalId(org, NETLIFY, externalId);
         if (alreadyReceived.isPresent()) {
             InboundLead lead = alreadyReceived.get();
             return new LeadIntakeResultDTO(
@@ -88,12 +103,13 @@ public class LeadIntakeService {
         String phoneDigits = PhoneNumbers.digits(submission.phone());
 
         Optional<Customer> existing = Optional.<Customer>empty();
-        if (email != null) existing = customerRepository.findFirstByEmail(email);
-        if (existing.isEmpty() && phoneDigits != null) existing = customerRepository.findFirstByPhoneDigits(phoneDigits);
+        if (email != null) existing = customerRepository.findFirstByOrganizationIdAndEmail(org, email);
+        if (existing.isEmpty() && phoneDigits != null) existing = customerRepository.findFirstByPhoneDigits(org, phoneDigits);
 
         boolean newCustomer = existing.isEmpty();
         Customer customer = existing.orElseGet(Customer::new);
         if (newCustomer) {
+            customer.setOrganizationId(org);
             customer.setName(submission.name() != null ? submission.name() : "Lead do formulário");
             customer.setStatus(CustomerStatus.LEAD);
         }
@@ -101,41 +117,73 @@ public class LeadIntakeService {
         if (customer.getEmail() == null && email != null) customer.setEmail(email);
         if (customer.getPhone() == null && phoneDigits != null) customer.setPhone(PhoneNumbers.format(phoneDigits));
         if (customer.getCompany() == null && submission.company() != null) customer.setCompany(submission.company());
-        customer = customerRepository.save(customer);
+        Customer saved = customerRepository.save(customer);
 
-        DealResponseDTO deal = dealService.create(new DealRequestDTO(
+        // O webhook não tem login: o negócio é criado explicitamente na organização dona do formulário
+        DealResponseDTO deal = tenant.callAs(org, () -> dealService.create(new DealRequestDTO(
                 dealTitle(submission),
-                customer.getId(),
+                saved.getId(),
                 BigDecimal.ZERO,
                 DealStage.PROSPECT,
                 DealSource.WEBSITE,
                 null,
                 null,
-                notes(submission)));
+                notes(submission))));
 
         InboundLead lead = new InboundLead();
+        lead.setOrganizationId(org);
         lead.setProvider(NETLIFY);
         lead.setExternalId(externalId);
         lead.setFormName(submission.formName());
         lead.setPayload(new String(body, StandardCharsets.UTF_8));
-        lead.setCustomer(customer);
+        lead.setCustomer(saved);
         lead.setDeal(dealRepository.getReferenceById(deal.id()));
         lead.setReceivedAt(clock.instant());
         inboundLeadRepository.save(lead);
 
-        return new LeadIntakeResultDTO(customer.getId(), deal.id(), newCustomer, false);
+        return new LeadIntakeResultDTO(saved.getId(), deal.id(), newCustomer, false);
     }
 
     @Transactional(readOnly = true)
     public List<InboundLeadDTO> recent(int limit) {
-        return inboundLeadRepository.findAllByOrderByReceivedAtDesc(PageRequest.of(0, limit))
+        return inboundLeadRepository.findByOrganizationIdOrderByReceivedAtDesc(tenant.organizationId(), PageRequest.of(0, limit))
                 .stream()
                 .map(InboundLeadDTO::from)
                 .toList();
     }
 
-    public boolean isNetlifyEnabled() {
-        return netlifyVerifier.isEnabled();
+    @Transactional(readOnly = true)
+    public IntegrationStatusDTO status() {
+        Organization organization = currentOrganization();
+        return new IntegrationStatusDTO(
+                !organization.isDemo(),
+                organization.getNetlifyWebhookSecret() != null,
+                NETLIFY_WEBHOOK_PATH + organization.getSlug());
+    }
+
+    /**
+     * Gera (ou troca) a chave que assina os webhooks do Netlify da organização.
+     * A chave é devolvida para ser colada no Netlify; trocá-la invalida a anterior.
+     */
+    @Transactional
+    public String regenerateNetlifySecret() {
+        if (!tenant.isAdmin()) {
+            throw new AccessDeniedException("Só administradores podem configurar integrações.");
+        }
+        Organization organization = currentOrganization();
+        if (organization.isDemo()) {
+            throw new BusinessRuleException("Integrações não estão disponíveis na organização de demonstração.");
+        }
+        byte[] bytes = new byte[30];
+        RANDOM.nextBytes(bytes);
+        String secret = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes); // 40 caracteres
+        organization.setNetlifyWebhookSecret(secret);
+        return secret;
+    }
+
+    private Organization currentOrganization() {
+        return organizationRepository.findById(tenant.organizationId())
+                .orElseThrow(() -> new ResourceNotFoundException("Organização não encontrada"));
     }
 
     private JsonNode parse(byte[] body) {
