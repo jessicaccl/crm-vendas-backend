@@ -5,6 +5,12 @@
 API REST de um CRM de vendas: clientes, funil de negócios, indicadores e integrações com outras plataformas.
 Frontend em [crm-frontend](https://github.com/jessicaccl/crm-frontend).
 
+**Demo online:** https://crm-pro-jessica.vercel.app (clique em "Entrar como demo")
+**Documentação da API:** https://crm-vendas-api-a5xa.onrender.com/docs
+*(plano gratuito: o primeiro acesso pode levar até 1 minuto enquanto o servidor acorda)*
+
+![Funil de vendas](https://raw.githubusercontent.com/jessicaccl/crm-frontend/main/docs/screenshots/funil-arrastar.gif)
+
 **Stack:** Java 17 · Spring Boot 3.5 · Spring Security (JWT) · Spring Data JPA · PostgreSQL · Flyway · springdoc (Swagger) · Testcontainers · Docker
 
 ## Como rodar
@@ -42,6 +48,8 @@ No GitHub, o mesmo comando roda a cada push e pull request.
 
 A API é stateless: `POST /api/v1/auth/login` devolve um JWT, e as demais rotas exigem `Authorization: Bearer <token>`.
 No Swagger, faça login, copie o `token` e clique em **Authorize**.
+
+![Swagger da API](docs/swagger.png)
 
 São públicos apenas o login, o `/actuator/health` e a documentação.
 
@@ -88,14 +96,10 @@ Usuário (login)
 Toda mudança de etapa gera um registro em `tb_deal_stage_changes` e publica um `DealStageChangedEvent`.
 Esse evento é o ponto de extensão para integrações: na fase 5 um listener envia webhooks com ele.
 
-## Deploy (Neon + Render)
+## Deploy
 
-1. **Banco no [Neon](https://neon.tech):** crie um projeto e copie os dados de conexão.
-   A URL do Neon tem o formato `postgresql://usuario:senha@host/banco?sslmode=require`; no Render ela vira três variáveis:
-   `DB_URL=jdbc:postgresql://host/banco?sslmode=require`, `DB_USERNAME=usuario` e `DB_PASSWORD=senha`.
-2. **API no [Render](https://render.com):** New → Blueprint → este repositório. O `render.yaml` já configura o Docker,
-   o health check e gera o `JWT_SECRET`. Preencha as variáveis pedidas na tela.
-3. Depois do deploy do frontend, coloque o endereço dele em `CORS_ALLOWED_ORIGINS`.
+Banco no **Neon**, API no **Render** (Docker, via [`render.yaml`](render.yaml)) e frontend na **Vercel**, todos no plano gratuito.
+O passo a passo com prints está em **[docs/DEPLOY.md](docs/DEPLOY.md)**.
 
 Na demo online, `DEMO_RESET_CRON=0 0 4 * * *` restaura os dados de exemplo todo dia às 4h.
 
@@ -118,6 +122,6 @@ db/migration  scripts versionados do Flyway
 
 - [x] Fase 1: base (configuração segura, DTOs, erros padronizados, paginação, Flyway, Docker)
 - [x] Fase 2: negócios, histórico de etapas e indicadores do funil
-- [x] Fase 3: login (JWT), testes de integração, CI e configuração de deploy
+- [x] Fase 3: login (JWT), testes de integração, CI, deploy e demo online
 - [ ] Fase 4: painel de resultados
 - [ ] Fase 5: atividades, tarefas, webhooks e entrada de leads por API
