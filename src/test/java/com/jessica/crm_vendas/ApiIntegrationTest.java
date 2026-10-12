@@ -337,6 +337,106 @@ class ApiIntegrationTest {
                 .andExpect(jsonPath("$.phone").value("(11) 97777-6666"));
     }
 
+    // ---------- Ficha do cliente e tarefas ----------
+
+    private long customerIdByName(String token, String name) throws Exception {
+        return body(mvc.perform(get("/api/v1/customers").param("q", name).header(HttpHeaders.AUTHORIZATION, token)))
+                .at("/content/0/id").asLong();
+    }
+
+    private long dealIdByTitle(String token, String title) throws Exception {
+        for (JsonNode deal : body(mvc.perform(get("/api/v1/deals").header(HttpHeaders.AUTHORIZATION, token)))) {
+            if (title.equals(deal.get("title").asText())) return deal.get("id").asLong();
+        }
+        throw new AssertionError("Negócio não encontrado: " + title);
+    }
+
+    private List<String> timelineKinds(String token, long customerId) throws Exception {
+        List<String> kinds = new ArrayList<>();
+        body(mvc.perform(get("/api/v1/customers/" + customerId + "/timeline").header(HttpHeaders.AUTHORIZATION, token))
+                .andExpect(status().isOk()))
+                .forEach(item -> kinds.add(item.get("kind").asText()));
+        return kinds;
+    }
+
+    @Test
+    void customerTimelineJoinsActivitiesStageChangesAndTasks() throws Exception {
+        String demo = demo();
+        long carla = customerIdByName(demo, "Carla Mendes");
+        long appPedidos = dealIdByTitle(demo, "App de pedidos");
+
+        // Os dados de demonstração já trazem histórico
+        assertThat(timelineKinds(demo, carla)).contains("CALL", "EMAIL", "WHATSAPP", "STAGE_CHANGE", "TASK_DONE");
+
+        // Registrar uma anotação: entra no topo da linha do tempo, assinada por quem registrou
+        mvc.perform(post("/api/v1/customers/" + carla + "/activities")
+                        .header(HttpHeaders.AUTHORIZATION, demo)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"type\":\"NOTE\",\"content\":\"Prefere reunião por vídeo\",\"dealId\":" + appPedidos + "}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.author").value("Usuário Demo"));
+        JsonNode timeline = body(mvc.perform(get("/api/v1/customers/" + carla + "/timeline").header(HttpHeaders.AUTHORIZATION, demo)));
+        assertThat(timeline.get(0).get("detail").asText()).isEqualTo("Prefere reunião por vídeo");
+        assertThat(timeline.get(0).get("dealTitle").asText()).isEqualTo("App de pedidos");
+
+        // Tarefa só com o negócio fica também na ficha do cliente dele
+        JsonNode task = body(mvc.perform(post("/api/v1/tasks")
+                        .header(HttpHeaders.AUTHORIZATION, demo)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Ligar para fechar o contrato\",\"dueAt\":\"2030-01-10T17:00:00Z\",\"dealId\":" + appPedidos + "}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.customer.id").value(carla)));
+
+        mvc.perform(get("/api/v1/tasks").param("done", "false").param("customerId", String.valueOf(carla))
+                        .header(HttpHeaders.AUTHORIZATION, demo))
+                .andExpect(jsonPath("$[?(@.title == 'Ligar para fechar o contrato')]").exists());
+
+        // Concluir a tarefa: ela sai das pendentes e aparece na linha do tempo
+        mvc.perform(patch("/api/v1/tasks/" + task.get("id").asLong() + "/done")
+                        .header(HttpHeaders.AUTHORIZATION, demo)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"done\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.doneAt").isNotEmpty());
+        JsonNode afterDone = body(mvc.perform(get("/api/v1/customers/" + carla + "/timeline").header(HttpHeaders.AUTHORIZATION, demo)));
+        assertThat(afterDone.get(0).get("kind").asText()).isEqualTo("TASK_DONE");
+        assertThat(afterDone.get(0).get("detail").asText()).isEqualTo("Ligar para fechar o contrato");
+
+        // Negócio de outro cliente não pode ser ligado à tarefa
+        long paulo = customerIdByName(demo, "Paulo Siqueira");
+        mvc.perform(post("/api/v1/tasks")
+                        .header(HttpHeaders.AUTHORIZATION, demo)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Errada\",\"dueAt\":\"2030-01-10T17:00:00Z\",\"customerId\":" + paulo
+                                + ",\"dealId\":" + appPedidos + "}"))
+                .andExpect(status().isUnprocessableEntity());
+    }
+
+    @Test
+    void timelineAndTasksAreIsolatedByOrganization() throws Exception {
+        String demo = demo();
+        String admin = admin();
+        long carla = customerIdByName(demo, "Carla Mendes");
+        long appPedidos = dealIdByTitle(demo, "App de pedidos");
+
+        mvc.perform(get("/api/v1/customers/" + carla + "/timeline").header(HttpHeaders.AUTHORIZATION, admin))
+                .andExpect(status().isNotFound());
+        mvc.perform(post("/api/v1/customers/" + carla + "/activities")
+                        .header(HttpHeaders.AUTHORIZATION, admin)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"type\":\"NOTE\",\"content\":\"invasão\"}"))
+                .andExpect(status().isNotFound());
+        mvc.perform(post("/api/v1/tasks")
+                        .header(HttpHeaders.AUTHORIZATION, admin)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"invasão\",\"dueAt\":\"2030-01-10T17:00:00Z\",\"dealId\":" + appPedidos + "}"))
+                .andExpect(status().isNotFound());
+
+        // A lista de tarefas da Unic não mostra as da Demo
+        mvc.perform(get("/api/v1/tasks").header(HttpHeaders.AUTHORIZATION, admin))
+                .andExpect(jsonPath("$[?(@.title == 'Cobrar retorno da proposta de integração')]").doesNotExist());
+    }
+
     // ---------- Importação de planilha ----------
 
     @Test

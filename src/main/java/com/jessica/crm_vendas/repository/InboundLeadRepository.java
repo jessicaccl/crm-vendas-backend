@@ -18,6 +18,9 @@ public interface InboundLeadRepository extends JpaRepository<InboundLead, Long> 
     @EntityGraph(attributePaths = {"customer", "deal"})
     List<InboundLead> findByOrganizationIdOrderByReceivedAtDesc(Long organizationId, Pageable pageable);
 
+    @EntityGraph(attributePaths = "deal")
+    List<InboundLead> findByOrganizationIdAndCustomerIdOrderByReceivedAtDesc(Long organizationId, Long customerId);
+
     @Modifying
     @Query("delete from InboundLead l where l.organizationId = :organizationId")
     void deleteAllOfOrganization(Long organizationId);
