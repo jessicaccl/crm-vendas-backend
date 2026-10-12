@@ -26,6 +26,11 @@ import com.jessica.crm_vendas.repository.CustomerRepository;
 import com.jessica.crm_vendas.repository.DealRepository;
 import com.jessica.crm_vendas.repository.DealStageChangeRepository;
 import com.jessica.crm_vendas.repository.InboundLeadRepository;
+import com.jessica.crm_vendas.repository.ActivityRepository;
+import com.jessica.crm_vendas.repository.TaskRepository;
+import com.jessica.crm_vendas.model.Activity;
+import com.jessica.crm_vendas.model.ActivityType;
+import com.jessica.crm_vendas.model.Task;
 import com.jessica.crm_vendas.repository.OrganizationRepository;
 
 import lombok.RequiredArgsConstructor;
@@ -46,6 +51,8 @@ public class DemoDataLoader implements CommandLineRunner {
     private final DealRepository dealRepository;
     private final DealStageChangeRepository stageChangeRepository;
     private final InboundLeadRepository inboundLeadRepository;
+    private final ActivityRepository activityRepository;
+    private final TaskRepository taskRepository;
     private final OrganizationRepository organizationRepository;
     private final Clock clock;
 
@@ -69,6 +76,8 @@ public class DemoDataLoader implements CommandLineRunner {
         // Só a organização Demo: os dados das empresas reais nunca são tocados
         Long demo = demoOrganizationId();
         inboundLeadRepository.deleteAllOfOrganization(demo);
+        activityRepository.deleteAllOfOrganization(demo);
+        taskRepository.deleteAllOfOrganization(demo);
         dealRepository.deleteAllOfOrganization(demo);
         customerRepository.deleteAllOfOrganization(demo);
         seed(demo);
@@ -126,7 +135,62 @@ public class DemoDataLoader implements CommandLineRunner {
                 .map(deal -> new DealStageChange(deal, null, deal.getStage(), deal.getStageChangedAt()))
                 .toList());
 
+        // Ficha do cliente: histórico de contatos e próximos passos
+        Deal planoAnual = deals.get(1);
+        Deal agendamento = deals.get(3);
+        Deal appPedidos = deals.get(5);
+        Deal erp = deals.get(6);
+        activityRepository.saveAll(List.of(
+            activity(organizationId, helena, planoAnual, ActivityType.NOTE,
+                    "Indicada pela Lúcia (Escola Pequeno Saber). Prefere contato por WhatsApp, à tarde.", daysAgo(now, 9)),
+            activity(organizationId, carla, appPedidos, ActivityType.CALL,
+                    "Ligação de diagnóstico (25 min): 6 lojas, querem pedido pelo celular com retirada na loja.", daysAgo(now, 9)),
+            activity(organizationId, carla, appPedidos, ActivityType.EMAIL,
+                    "Proposta enviada: app de pedidos com retirada, implantação em 10 semanas.", daysAgo(now, 3)),
+            activity(organizationId, carla, appPedidos, ActivityType.WHATSAPP,
+                    "Carla: gostamos da proposta, só queremos rever o prazo da fase 2.", now.minus(Duration.ofHours(5))),
+            activity(organizationId, paulo, erp, ActivityType.MEETING,
+                    "Reunião com o TI da distribuidora: integração pela API do ERP é viável.", daysAgo(now, 12))));
+
+        // Tarefa "de hoje": 18h; se a demo for gerada depois disso, logo antes da meia-noite
+        Instant todayEvening = today.toLocalDate().atTime(18, 0).atZone(today.getZone()).toInstant();
+        Instant endOfToday = today.toLocalDate().atTime(23, 55).atZone(today.getZone()).toInstant();
+        Instant dueToday = now.isBefore(todayEvening) ? todayEvening : later(now.plus(Duration.ofMinutes(5)), endOfToday);
+
+        Task proposalSent = task(organizationId, carla, appPedidos, "Enviar proposta revisada", daysAgo(now, 4), now);
+        proposalSent.setDoneAt(daysAgo(now, 3));
+        taskRepository.saveAll(List.of(
+            task(organizationId, paulo, erp, "Cobrar retorno da proposta de integração", daysAgo(now, 1), now),
+            task(organizationId, carla, appPedidos, "Enviar novo cronograma da fase 2", dueToday, now),
+            task(organizationId, helena, planoAnual, "Mandar portfólio de clínicas no WhatsApp", now.plus(Duration.ofDays(1)), now),
+            task(organizationId, marcos, agendamento, "Reunião de alinhamento do sistema de agendamento", now.plus(Duration.ofDays(3)), now),
+            proposalSent));
+
         log.info("Dados de demonstração criados: {} clientes e {} negócios", 8, deals.size());
+    }
+
+    private static Activity activity(Long organizationId, Customer customer, Deal deal, ActivityType type,
+                                     String content, Instant at) {
+        Activity activity = new Activity();
+        activity.setOrganizationId(organizationId);
+        activity.setCustomer(customer);
+        activity.setDeal(deal);
+        activity.setType(type);
+        activity.setContent(content);
+        activity.setAuthorName("Usuário Demo");
+        activity.setCreatedAt(at);
+        return activity;
+    }
+
+    private static Task task(Long organizationId, Customer customer, Deal deal, String title, Instant dueAt, Instant now) {
+        Task task = new Task();
+        task.setOrganizationId(organizationId);
+        task.setCustomer(customer);
+        task.setDeal(deal);
+        task.setTitle(title);
+        task.setDueAt(dueAt);
+        task.setCreatedAt(now);
+        return task;
     }
 
     private static Instant daysAgo(Instant now, int days) {

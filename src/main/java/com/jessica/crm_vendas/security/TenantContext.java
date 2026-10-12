@@ -41,6 +41,12 @@ public class TenantContext {
         return jwt != null && "ADMIN".equals(jwt.getToken().getClaimAsString(ROLE_CLAIM));
     }
 
+    /** Nome de quem está logado (claim "name"), para assinar as atividades registradas. */
+    public String userName() {
+        JwtAuthenticationToken jwt = jwt();
+        return jwt == null ? null : jwt.getToken().getClaimAsString("name");
+    }
+
     /** Executa o trecho como se o pedido fosse da organização informada (ex.: webhook). */
     public <T> T callAs(Long organizationId, Supplier<T> action) {
         Long previous = OVERRIDE.get();
