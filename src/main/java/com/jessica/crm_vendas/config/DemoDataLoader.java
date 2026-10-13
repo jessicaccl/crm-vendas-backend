@@ -6,6 +6,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZonedDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.slf4j.Logger;
@@ -127,13 +128,17 @@ public class DemoDataLoader implements CommandLineRunner {
             deal("Identidade visual", marcos, "6200", DealStage.WON, DealSource.INSTAGRAM, lastMonth, null, null),
             deal("Site da escola", lucia, "18000", DealStage.WON, DealSource.WEBSITE, lastMonthLate, null, null),
             deal("Chatbot de atendimento", fernanda, "8900", DealStage.LOST, DealSource.WHATSAPP, daysAgo(now, 20), null, "Preço acima do orçamento"),
-            deal("Tour virtual dos imóveis", fernanda, "5400", DealStage.LOST, DealSource.WEBSITE, daysAgo(now, 40), null, "Sem resposta do cliente")
+            deal("Tour virtual dos imóveis", fernanda, "5400", DealStage.LOST, DealSource.WEBSITE, daysAgo(now, 40), null, "Sem resposta do cliente"),
+            // Histórico dos meses anteriores, para o painel de resultados ter o que mostrar
+            deal("Loja virtual de cestas", rita, "14500", DealStage.WON, DealSource.INSTAGRAM, monthsAgo(today, 2, 10), null, null),
+            deal("Sistema de reservas", marcos, "21000", DealStage.WON, DealSource.REFERRAL, monthsAgo(today, 3, 18), null, null),
+            deal("Site com SEO local", paulo, "9800", DealStage.WON, DealSource.WEBSITE, monthsAgo(today, 4, 7), null, null),
+            deal("Catálogo digital", carla, "6400", DealStage.WON, DealSource.WHATSAPP, monthsAgo(today, 5, 22), null, null),
+            deal("Site multilíngue", rita, "7300", DealStage.LOST, DealSource.INSTAGRAM, daysAgo(now, 30), null, "Escolheu um concorrente")
         );
         deals.forEach(deal -> deal.setOrganizationId(organizationId));
         dealRepository.saveAll(deals);
-        stageChangeRepository.saveAll(deals.stream()
-                .map(deal -> new DealStageChange(deal, null, deal.getStage(), deal.getStageChangedAt()))
-                .toList());
+        stageChangeRepository.saveAll(history(deals));
 
         // Ficha do cliente: histórico de contatos e próximos passos
         Deal planoAnual = deals.get(1);
@@ -167,6 +172,39 @@ public class DemoDataLoader implements CommandLineRunner {
             proposalSent));
 
         log.info("Dados de demonstração criados: {} clientes e {} negócios", 8, deals.size());
+    }
+
+    /**
+     * Caminho de cada negócio pelo funil: entrou em Prospecto alguns dias antes,
+     * passou por Qualificado ou Proposta e chegou à etapa atual. Alimenta o funil
+     * de conversão, o ciclo médio de venda e a linha do tempo dos clientes.
+     */
+    private static List<DealStageChange> history(List<Deal> deals) {
+        List<DealStageChange> changes = new ArrayList<>();
+        for (int i = 0; i < deals.size(); i++) {
+            Deal deal = deals.get(i);
+            Instant at = deal.getStageChangedAt();
+            if (deal.getStage() == DealStage.PROSPECT) {
+                changes.add(new DealStageChange(deal, null, DealStage.PROSPECT, at));
+                continue;
+            }
+            int cycleDays = 6 + (i * 5) % 17;
+            Instant start = at.minus(Duration.ofDays(cycleDays));
+            changes.add(new DealStageChange(deal, null, DealStage.PROSPECT, start));
+            if (deal.getStage().isClosed()) {
+                changes.add(new DealStageChange(deal, DealStage.PROSPECT, DealStage.PROPOSAL, start.plus(Duration.ofDays(cycleDays / 2))));
+                changes.add(new DealStageChange(deal, DealStage.PROPOSAL, deal.getStage(), at));
+            } else {
+                changes.add(new DealStageChange(deal, DealStage.PROSPECT, deal.getStage(), at));
+            }
+        }
+        return changes;
+    }
+
+    /** Dia do mês, k meses atrás (às 15h). */
+    private static Instant monthsAgo(ZonedDateTime today, int months, int day) {
+        return today.toLocalDate().withDayOfMonth(1).minusMonths(months).plusDays(day - 1L)
+                .atTime(15, 0).atZone(today.getZone()).toInstant();
     }
 
     private static Activity activity(Long organizationId, Customer customer, Deal deal, ActivityType type,
