@@ -13,4 +13,8 @@ public interface DealStageChangeRepository extends JpaRepository<DealStageChange
     @Query("select c from DealStageChange c join fetch c.deal d "
             + "where d.organizationId = :organizationId and d.customer.id = :customerId order by c.changedAt desc")
     List<DealStageChange> findTimeline(Long organizationId, Long customerId);
+
+    /** Todo o histórico de etapas da organização, para o painel de resultados. */
+    @Query("select c from DealStageChange c join c.deal d where d.organizationId = :organizationId")
+    List<DealStageChange> findAllOfOrganization(Long organizationId);
 }

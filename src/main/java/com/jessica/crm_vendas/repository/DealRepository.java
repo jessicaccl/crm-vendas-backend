@@ -25,6 +25,9 @@ public interface DealRepository extends JpaRepository<Deal, Long>, JpaSpecificat
 
     Optional<Deal> findByIdAndOrganizationId(Long id, Long organizationId);
 
+    @EntityGraph(attributePaths = "customer")
+    List<Deal> findByOrganizationId(Long organizationId);
+
     boolean existsByCustomerId(Long customerId);
 
     @Query("select new com.jessica.crm_vendas.repository.DealTotals(count(d), sum(d.value)) "

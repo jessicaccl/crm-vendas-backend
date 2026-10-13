@@ -437,6 +437,29 @@ class ApiIntegrationTest {
                 .andExpect(jsonPath("$[?(@.title == 'Cobrar retorno da proposta de integração')]").doesNotExist());
     }
 
+    // ---------- Painel de resultados ----------
+
+    @Test
+    void dashboardShowsTheOrganizationResultsOnly() throws Exception {
+        JsonNode demo = body(mvc.perform(get("/api/v1/reports/dashboard").header(HttpHeaders.AUTHORIZATION, demo()))
+                .andExpect(status().isOk()));
+        assertThat(demo.get("revenueByMonth")).hasSize(6);
+        assertThat(demo.at("/funnel/0/stage").asText()).isEqualTo("PROSPECT");
+        assertThat(demo.at("/forecast/weightedValue").decimalValue()).isPositive();
+        assertThat(demo.get("averageCycleDays").asDouble()).isPositive();
+
+        double demoRevenue = 0;
+        for (JsonNode month : demo.get("revenueByMonth")) demoRevenue += month.get("value").asDouble();
+        assertThat(demoRevenue).as("a demo tem vendas nos últimos meses").isPositive();
+
+        // A Unic não ganhou nada nestes testes: o painel dela não herda a receita da Demo
+        JsonNode unic = body(mvc.perform(get("/api/v1/reports/dashboard").header(HttpHeaders.AUTHORIZATION, admin()))
+                .andExpect(status().isOk()));
+        double unicRevenue = 0;
+        for (JsonNode month : unic.get("revenueByMonth")) unicRevenue += month.get("value").asDouble();
+        assertThat(unicRevenue).isZero();
+    }
+
     // ---------- Importação de planilha ----------
 
     @Test

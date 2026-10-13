@@ -2,7 +2,9 @@
 
 [![CI](https://github.com/jessicaccl/crm-vendas-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/jessicaccl/crm-vendas-backend/actions/workflows/ci.yml)
 
-API REST de um CRM de vendas: clientes, funil de negócios, indicadores e integrações com outras plataformas.
+API REST de um CRM de vendas **multiempresa**: clientes, funil de negócios, ficha do cliente com linha do tempo,
+tarefas, painel de resultados e entrada automática de leads (webhook do Netlify e planilhas CSV).
+Em uso real pela Unic Studio, recebendo os leads do quiz de diagnóstico do site.
 Frontend em [crm-frontend](https://github.com/jessicaccl/crm-frontend).
 
 **Demo online:** https://crm-pro-jessica.vercel.app (clique em "Entrar como demo")
@@ -10,6 +12,10 @@ Frontend em [crm-frontend](https://github.com/jessicaccl/crm-frontend).
 *(plano gratuito: o primeiro acesso pode levar até 1 minuto enquanto o servidor acorda)*
 
 ![Funil de vendas](https://raw.githubusercontent.com/jessicaccl/crm-frontend/main/docs/screenshots/funil-arrastar.gif)
+
+| Painel de resultados | Ficha do cliente |
+|---|---|
+| ![Painel](https://raw.githubusercontent.com/jessicaccl/crm-frontend/main/docs/screenshots/15-painel.png) | ![Ficha](https://raw.githubusercontent.com/jessicaccl/crm-frontend/main/docs/screenshots/13-ficha-do-cliente.png) |
 
 **Stack:** Java 17 · Spring Boot 3.5 · Spring Security (JWT) · Spring Data JPA · PostgreSQL · Flyway · springdoc (Swagger) · Testcontainers · Docker
 
@@ -71,6 +77,13 @@ São públicos apenas o login, o `/actuator/health` e a documentação.
 | PATCH | `/api/v1/deals/{id}/stage` | Move de etapa, grava o histórico e publica o evento |
 | DELETE | `/api/v1/deals/{id}` | Exclui |
 | GET | `/api/v1/reports/summary` | Indicadores: em aberto, ganho no mês, conversão em 90 dias, parados |
+| GET | `/api/v1/reports/dashboard` | Painel: receita por mês, funil de conversão, origens, previsão ponderada, ciclo médio, ticket médio, motivos de perda, parados |
+| GET | `/api/v1/customers/{id}/timeline` | Linha do tempo: atividades, mudanças de etapa, leads recebidos e tarefas concluídas |
+| POST | `/api/v1/customers/{id}/activities` | Registra anotação, ligação, WhatsApp, e-mail ou reunião |
+| DELETE | `/api/v1/activities/{id}` | Exclui uma atividade |
+| GET | `/api/v1/tasks?done=&customerId=&dealId=` | Lista tarefas (pendentes pelo prazo, concluídas pelas recentes) |
+| POST / PUT / DELETE | `/api/v1/tasks[/{id}]` | Cria, edita e exclui tarefas |
+| PATCH | `/api/v1/tasks/{id}/done` | Conclui ou reabre uma tarefa |
 | POST | `/api/v1/integrations/netlify/forms/{organização}` | Webhook do Netlify Forms (autenticado pela assinatura da organização) |
 | POST | `/api/v1/integrations/netlify/secret` | Gera a chave do webhook da organização (administradoras) |
 | POST | `/api/v1/integrations/import/csv?source=` | Importa uma planilha CSV de leads (multipart, até 2 MB / 2.000 linhas) |
@@ -98,11 +111,29 @@ Erros seguem o padrão [ProblemDetail (RFC 9457)](https://www.rfc-editor.org/rfc
 ```
 Organização 1 ── N Usuário
             1 ── N Cliente 1 ── N Negócio 1 ── N Mudança de etapa
+                           1 ── N Atividade (anotação, ligação, WhatsApp, e-mail, reunião)
+                           1 ── N Tarefa (opcionalmente ligada a um negócio)
             1 ── N Lead recebido (integração) ──> Cliente + Negócio
 ```
 
 Toda mudança de etapa gera um registro em `tb_deal_stage_changes` e publica um `DealStageChangedEvent`.
-Esse evento é o ponto de extensão para webhooks de saída.
+Esse histórico alimenta o funil de conversão e o ciclo médio do painel, e a linha do tempo do cliente.
+O evento é o ponto de extensão para webhooks de saída.
+
+## Painel de resultados
+
+`GET /reports/dashboard` calcula, para a organização logada:
+
+| Métrica | Como é calculada |
+|---|---|
+| Receita por mês | soma dos negócios ganhos em cada um dos últimos 6 meses (fuso `APP_TIMEZONE`) |
+| Funil de conversão | dos negócios que entraram nos últimos 90 dias, quantos chegaram a cada etapa ou além (pelo histórico) |
+| Origem | negócios por origem, com quantos foram ganhos e o valor |
+| Previsão ponderada | valor em aberto × chance da etapa (Prospecto 10%, Qualificado 30%, Proposta 60%) |
+| Ciclo médio | dias da entrada no funil até o ganho, nos ganhos dos últimos 90 dias |
+| Motivos de perda | os mais comuns nos últimos 90 dias |
+
+Os cálculos ficam em `DashboardService.build`, uma função pura testada com dados controlados.
 
 ## Multiempresa (multi-tenant)
 
@@ -187,5 +218,8 @@ db/migration  scripts versionados do Flyway
 - [x] Fase 3: login (JWT), testes de integração, CI, deploy e demo online
 - [x] Fase 4: integração com o formulário do Netlify e importação de planilhas CSV
 - [x] Fase 5: multiempresa (organizações isoladas em um único deploy)
-- [ ] Fase 6: painel de resultados
-- [ ] Fase 7: ficha do cliente com atividades e tarefas, webhooks de saída
+- [x] Fase 6: painel de resultados
+- [x] Fase 7: ficha do cliente, linha do tempo e tarefas
+
+**Próximos passos possíveis:** webhooks de saída (o evento de mudança de etapa já existe), cadastro de novas
+empresas e convites de usuários pela própria tela, anexos na ficha do cliente.
