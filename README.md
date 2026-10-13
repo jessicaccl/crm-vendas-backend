@@ -11,6 +11,8 @@ Frontend em [crm-frontend](https://github.com/jessicaccl/crm-frontend).
 **Documentação da API:** https://crm-vendas-api-a5xa.onrender.com/docs
 *(plano gratuito: o primeiro acesso pode levar até 1 minuto enquanto o servidor acorda)*
 
+📄 **Estudo de caso de produto:** [problema, decisões e próximos passos](docs/ESTUDO-DE-CASO.md)
+
 ![Funil de vendas](https://raw.githubusercontent.com/jessicaccl/crm-frontend/main/docs/screenshots/funil-arrastar.gif)
 
 | Painel de resultados | Ficha do cliente |
