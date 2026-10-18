@@ -55,6 +55,8 @@ No GitHub, o mesmo comando roda a cada push e pull request.
 ## Autenticação
 
 A API é stateless: `POST /api/v1/auth/login` devolve um JWT, e as demais rotas exigem `Authorization: Bearer <token>`.
+Para dificultar a adivinhação de senhas, 5 erros seguidos do mesmo e-mail e IP (ou 20 de um mesmo IP) bloqueiam o login por 15 minutos,
+com resposta `429` e cabeçalho `Retry-After`. Atrás de um proxy, defina `CLIENT_IP_HEADER` (no Render: `CF-Connecting-IP`).
 No Swagger, faça login, copie o `token` e clique em **Authorize**.
 
 ![Swagger da API](docs/swagger.png)
