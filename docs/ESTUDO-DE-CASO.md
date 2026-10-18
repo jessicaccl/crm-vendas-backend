@@ -148,8 +148,8 @@ O painel da fase 6 já calcula essas métricas. O próximo passo é acompanhar o
 - **Uma pessoa por empresa:** ainda não há convite de equipe nem permissões por função.
 - **O painel calcula tudo em memória:** funciona bem com centenas de negócios, mas para dezenas de
   milhares seria preciso mover os cálculos para o banco.
-- **Segurança:** o login guarda o token no navegador e não limita tentativas. Para um uso maior,
-  eu adicionaria limite de tentativas e um token de renovação.
+- **Segurança:** o login guarda o token no navegador. O limite de tentativas já foi implementado:
+  5 erros seguidos bloqueiam o login por 15 minutos. Para um uso maior, eu adicionaria um token de renovação.
 - **Validação:** até agora, a única usuária real sou eu. Ainda falta testar com pessoas de fora.
 
 ## 10. Próximos passos (backlog priorizado)

@@ -35,3 +35,5 @@ services:
         value: "0 0 4 * * *" # restaura só a organização Demo
       - key: APP_TIMEZONE
         value: America/Sao_Paulo
+      - key: CLIENT_IP_HEADER
+        value: CF-Connecting-IP # IP real do cliente (preenchido pelo Cloudflare, na frente do Render)

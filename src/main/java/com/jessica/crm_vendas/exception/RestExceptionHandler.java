@@ -46,6 +46,13 @@ public class RestExceptionHandler extends ResponseEntityExceptionHandler {
         return problem(HttpStatus.UNAUTHORIZED, "Login inválido", "E-mail ou senha incorretos.");
     }
 
+    @ExceptionHandler(TooManyLoginAttemptsException.class)
+    ResponseEntity<ProblemDetail> handleTooManyLoginAttempts(TooManyLoginAttemptsException exception) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(exception.getRetryAfterSeconds()))
+                .body(problem(HttpStatus.TOO_MANY_REQUESTS, "Login bloqueado temporariamente", exception.getMessage()));
+    }
+
     @ExceptionHandler(SessionExpiredException.class)
     ProblemDetail handleSessionExpired(SessionExpiredException exception) {
         return problem(HttpStatus.UNAUTHORIZED, "Não autenticado", exception.getMessage());

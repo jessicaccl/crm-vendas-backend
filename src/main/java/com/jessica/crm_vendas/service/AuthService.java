@@ -2,6 +2,7 @@ package com.jessica.crm_vendas.service;
 
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -13,6 +14,7 @@ import com.jessica.crm_vendas.model.Organization;
 import com.jessica.crm_vendas.model.User;
 import com.jessica.crm_vendas.repository.OrganizationRepository;
 import com.jessica.crm_vendas.repository.UserRepository;
+import com.jessica.crm_vendas.security.LoginAttemptLimiter;
 import com.jessica.crm_vendas.security.TokenService;
 
 import lombok.RequiredArgsConstructor;
@@ -25,12 +27,23 @@ public class AuthService {
     private final UserRepository userRepository;
     private final OrganizationRepository organizationRepository;
     private final TokenService tokenService;
+    private final LoginAttemptLimiter loginAttemptLimiter;
 
-    /** Confere e-mail e senha (lança BadCredentialsException se não baterem) e devolve um token. */
+    /**
+     * Confere e-mail e senha (lança BadCredentialsException se não baterem) e devolve um token.
+     * Muitos erros seguidos do mesmo IP bloqueiam o login por um tempo (TooManyLoginAttemptsException).
+     */
     @Transactional(readOnly = true)
-    public LoginResponseDTO login(LoginRequestDTO data) {
+    public LoginResponseDTO login(LoginRequestDTO data, String clientIp) {
         String email = data.email().trim().toLowerCase();
-        authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(email, data.password()));
+        loginAttemptLimiter.checkAllowed(email, clientIp);
+        try {
+            authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(email, data.password()));
+        } catch (AuthenticationException exception) {
+            loginAttemptLimiter.recordFailure(email, clientIp);
+            throw exception;
+        }
+        loginAttemptLimiter.recordSuccess(email, clientIp);
 
         User user = findByEmail(email);
         TokenService.IssuedToken token = tokenService.issue(user);

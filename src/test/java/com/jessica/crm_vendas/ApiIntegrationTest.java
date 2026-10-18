@@ -2,11 +2,13 @@ package com.jessica.crm_vendas;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.matchesPattern;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -50,7 +52,8 @@ import com.jessica.crm_vendas.integration.NetlifyTestSupport;
     "app.admin.org-name=Unic Studio",
     "app.admin.org-slug=unic",
     "app.jwt.secret=chave-de-teste-com-pelo-menos-32-caracteres",
-    "app.demo-reset-cron=-"
+    "app.demo-reset-cron=-",
+    "app.client-ip-header=X-Test-Client-IP"
 })
 class ApiIntegrationTest {
 
@@ -135,6 +138,27 @@ class ApiIntegrationTest {
                 .andExpect(jsonPath("$.detail").value("E-mail ou senha incorretos."));
     }
 
+    @Test
+    void repeatedWrongPasswordsBlockLoginForAWhile() throws Exception {
+        // IP próprio deste teste (via cabeçalho configurado) para não afetar os outros logins
+        String body = json.writeValueAsString(new Credentials("ninguem@unic.test", "errada"));
+        for (int i = 0; i < 5; i++) {
+            mvc.perform(post("/api/v1/auth/login").header("X-Test-Client-IP", "203.0.113.7")
+                            .contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        mvc.perform(post("/api/v1/auth/login").header("X-Test-Client-IP", "203.0.113.7")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string(HttpHeaders.RETRY_AFTER, matchesPattern("\\d{3}")))
+                .andExpect(jsonPath("$.detail").value("Muitas tentativas de login. Tente novamente em 15 minutos."));
+
+        // Outro IP continua podendo tentar
+        mvc.perform(post("/api/v1/auth/login").header("X-Test-Client-IP", "198.51.100.1")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isUnauthorized());
+    }
     @Test
     void healthAndDocsArePublic() throws Exception {
         mvc.perform(get("/actuator/health")).andExpect(status().isOk());
